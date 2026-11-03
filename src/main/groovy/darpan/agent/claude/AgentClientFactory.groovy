@@ -29,15 +29,27 @@ class AgentClientFactory {
         String fingerprint = key + "\u0000" + baseUrl
         synchronized (LOCK) {
             if (cachedClient != null && fingerprint == cachedFingerprint) return cachedClient
+            AnthropicClient replaced = cachedClient
             cachedClient = AnthropicOkHttpClient.builder().apiKey(key).baseUrl(baseUrl).maxRetries(2).build()
             cachedFingerprint = fingerprint
+            closeQuietly(replaced)
             return cachedClient
         }
     }
 
     /** Forget the cached client (tests, key rotation). */
     static void reset() {
-        synchronized (LOCK) { cachedClient = null; cachedFingerprint = null }
+        synchronized (LOCK) {
+            AnthropicClient old = cachedClient
+            cachedClient = null; cachedFingerprint = null
+            closeQuietly(old)
+        }
+    }
+
+    // Releases the okhttp connection pool of a replaced client; a failed close must not break the new client.
+    private static void closeQuietly(AnthropicClient old) {
+        if (old == null) return
+        try { old.close() } catch (Exception ignored) { }
     }
 
     static String resolveKey() {
@@ -52,7 +64,4 @@ class AgentClientFactory {
         if (!check.ok) throw new IllegalStateException("Claude base URL refused: " + check.error)
         return check.normalizedUrl ?: url
     }
-
-    @Override
-    String toString() { return "AgentClientFactory" }
 }

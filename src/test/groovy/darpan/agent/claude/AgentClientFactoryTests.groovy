@@ -58,7 +58,7 @@ class AgentClientFactoryTests {
         try {
             def client = AgentClientFactory.client(null)
             assertNotNull(client)
-            String all = [AgentClientFactory.toString(), new AnthropicModelGateway(client).toString(), client.toString()].join("|")
+            String all = [AgentClientFactory.name, new AnthropicModelGateway(client).toString(), client.toString()].join("|")
             assertFalse(all.contains("SECRET123"), "toString leaked the key")
             // a bad URL must not echo the key either
             System.setProperty(URL_PROP, "https://evil.example.com")
@@ -66,6 +66,29 @@ class AgentClientFactoryTests {
             assertFalse(ex.toString().contains("SECRET123"))
             logged.each { assertFalse(it.contains("SECRET123"), "log leaked the key: ${it}") }
         } finally { ctx.configuration.rootLogger.removeAppender("keyLeakCapture"); ctx.updateLoggers() }
+    }
+
+    @Test
+    void "a refused base URL reads AGENT_UNAVAILABLE through the factory, and never leaks the key"() {
+        System.setProperty(KEY_PROP, SECRET)
+        System.setProperty(URL_PROP, "https://evil.example.com")
+        def e = assertThrows(IllegalStateException) { AgentClientFactory.client(null) }
+        assertTrue(e.message.contains("refused"))
+        assertFalse(e.toString().contains("SECRET123"))
+        // state() path: the refusal becomes AGENT_UNAVAILABLE, direct client() keeps throwing
+        assertEquals("AGENT_UNAVAILABLE", darpan.agent.AgentAvailability.resolve("ON") { AgentClientFactory.client(null) })
+        assertEquals("AGENT_OFF", darpan.agent.AgentAvailability.resolve("AGENT_OFF") { throw new IllegalStateException("x") })
+    }
+
+    @Test
+    void "a replaced client is closed"() {
+        System.setProperty(KEY_PROP, SECRET)
+        def a = AgentClientFactory.client(null)
+        System.setProperty(KEY_PROP, SECRET + "2")
+        def b = AgentClientFactory.client(null)
+        assertNotSame(a, b)
+        // closing twice is harmless; the replaced client was already closed by the factory without error
+        a.close()
     }
 
     @Test

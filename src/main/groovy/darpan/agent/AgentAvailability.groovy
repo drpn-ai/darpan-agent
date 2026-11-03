@@ -1,15 +1,30 @@
 package darpan.agent
 
 import darpan.agent.claude.AgentClientFactory
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 
 /**
  * DAR-BE-159. AgentSwitch (core) answers ON or AGENT_OFF. This component also knows whether a Claude client can be built,
  * so an ON switch with no key reads AGENT_UNAVAILABLE.
  */
 class AgentAvailability {
+    private static final Logger logger = LoggerFactory.getLogger(AgentAvailability.class)
+
     static String state(def ec) {
-        String core = AgentSwitch.state(ec)
-        return stateFor(core, core == AgentSwitch.ON ? AgentClientFactory.client(ec) : null)
+        return resolve(AgentSwitch.state(ec)) { AgentClientFactory.client(ec) }
+    }
+
+    /** Core state plus the client lookup; a refused base URL reads AGENT_UNAVAILABLE instead of throwing. */
+    static String resolve(String core, Closure clientSupplier) {
+        if (core != AgentSwitch.ON) return core
+        try {
+            return stateFor(core, clientSupplier.call())
+        } catch (IllegalStateException e) {
+            // The factory's refusal message never carries the key.
+            logger.warn("Agent unavailable: {}", e.message)
+            return AgentSwitch.AGENT_UNAVAILABLE
+        }
     }
 
     static String stateFor(String coreState, Object client) {
