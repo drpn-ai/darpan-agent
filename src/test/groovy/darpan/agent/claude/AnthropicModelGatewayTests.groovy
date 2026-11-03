@@ -56,4 +56,16 @@ class AnthropicModelGatewayTests {
         assertEquals("boom", e.message)
         assertEquals(1, fake.closed)
     }
+
+    @Test
+    void "the client is looked up on every request and a missing one is unavailable"() {
+        int lookups = 0
+        def gateway = AnthropicModelGateway.supplying { lookups++; null }
+        def params = com.anthropic.models.messages.MessageCreateParams.builder().model("claude-haiku-5-5").maxTokens(16L).addUserMessage("hi").build()
+        assertThrows(ModelUnavailableException) { gateway.send(params) }
+        assertThrows(ModelUnavailableException) { gateway.send(params) }
+        assertEquals(2, lookups)
+        def refused = AnthropicModelGateway.supplying { throw new IllegalStateException("Claude base URL refused: host") }
+        assertEquals("Claude base URL refused: host", assertThrows(ModelUnavailableException) { refused.send(params) }.message)
+    }
 }

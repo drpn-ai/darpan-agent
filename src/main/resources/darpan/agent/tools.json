@@ -1,0 +1,224 @@
+[
+  {
+    "name": "get_finding",
+    "service": "facade.AgentReadFacadeServices.get#AgentFinding",
+    "description": "Reads one audit finding of the active tenant by its id (for example F-20761): its statement, check, record key, state, conclusion and the facts the check recorded.",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["findingId"],
+      "properties": {
+        "findingId": {"type": "string", "description": "The finding's id."}
+      }
+    }
+  },
+  {
+    "name": "find_lookalikes",
+    "service": "facade.AgentReadFacadeServices.find#AuditFindingLookalikes",
+    "description": "Lists findings of the same check with the same conclusion (sameCause) and with a different one (controls), so a rule can be checked against both before it is proposed.",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["findingId"],
+      "properties": {
+        "findingId": {"type": "string", "description": "The finding to compare against."},
+        "limit": {"type": "integer", "description": "At most this many of each list, 1 to 200 (default 50)."}
+      }
+    }
+  },
+  {
+    "name": "inspect_record",
+    "service": "facade.AgentReadFacadeServices.inspect#AgentRecord",
+    "description": "Reads one record from a connected system by key, through a catalog read that returns only status, type, date, amount, id and SKU fields.",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["readId", "key"],
+      "properties": {
+        "readId": {"type": "string", "description": "A read of the read catalog."},
+        "key": {"type": "string", "description": "The value of that read's lookup key field."}
+      }
+    }
+  },
+  {
+    "name": "search_knowledge",
+    "service": "facade.AgentReadFacadeServices.search#AgentKnowledge",
+    "description": "Searches the knowledge base (product facts and the active tenant's own) for entries that match the words.",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["words"],
+      "properties": {
+        "words": {"type": "string", "description": "Words to look for."},
+        "limit": {"type": "integer", "description": "At most this many entries, 1 to 25 (default 8)."}
+      }
+    }
+  },
+  {
+    "name": "get_audit_settings",
+    "service": "facade.AuditFacadeServices.get#AuditSettings",
+    "description": "Reads an audit's settings: its name, schedule, and each statement with its checks and the run each check reads.",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["audit"],
+      "properties": {
+        "audit": {"type": "string", "description": "The audit's code, for example month-close."}
+      }
+    }
+  },
+  {
+    "name": "propose_change",
+    "service": "facade.AgentChangeFacadeServices.create#AuditChangeProposal",
+    "conversationScoped": true,
+    "description": "Drafts one change to the audit's config for a person to approve. Nothing changes until a person applies it. target and after carry only the keys of the kind: EXCLUSION_FILTER target {savedRunId, fileSide} after {fieldExpression, operator, filterValues, fieldLabel}; STATEMENT_NARROWING target {auditId, checkCode, statementCode} after {diffTypes, conclusionCodes, ruleIds}; FIX_TEXT target {savedRunId, conclusionCode} after {fixActionTemplate}; CONCLUSION_ROWS target {savedRunId} after {rows}.",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "target", "after", "reasonText", "evidence"],
+      "properties": {
+        "kind": {"type": "string", "enum": ["EXCLUSION_FILTER", "STATEMENT_NARROWING", "FIX_TEXT", "CONCLUSION_ROWS"]},
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "savedRunId": {"type": "string"},
+            "fileSide": {"type": "string", "enum": ["FILE_1", "FILE_2"]},
+            "auditId": {"type": "string"},
+            "checkCode": {"type": "string"},
+            "statementCode": {"type": "string"},
+            "conclusionCode": {"type": "string"}
+          }
+        },
+        "after": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fieldExpression": {"type": "string"},
+            "operator": {"type": "string"},
+            "filterValues": {"type": "array", "items": {"type": "string"}},
+            "fieldLabel": {"type": "string"},
+            "diffTypes": {"type": "array", "items": {"type": "string"}},
+            "conclusionCodes": {"type": "array", "items": {"type": "string"}},
+            "ruleIds": {"type": "array", "items": {"type": "string"}},
+            "fixActionTemplate": {"type": "string"},
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["conclusionCode"],
+                "properties": {
+                  "conclusionCode": {"type": "string"},
+                  "parentConclusionCode": {"type": "string"},
+                  "bucket": {"type": "string"},
+                  "fixActionTemplate": {"type": "string"},
+                  "conditions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["fieldExpression", "operator"],
+                      "properties": {
+                        "fieldExpression": {"type": "string"},
+                        "operator": {"type": "string"},
+                        "checkValue": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "reasonText": {"type": "string", "description": "Why, citing finding ids, record keys or fields."},
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["field", "value", "source"],
+            "properties": {
+              "field": {"type": "string"},
+              "value": {"type": "string"},
+              "source": {"type": "string", "enum": ["HUMAN", "CONFIG", "TOOL"]}
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "raise_ticket",
+    "service": "facade.AgentChangeFacadeServices.create#BrainChangeTicket",
+    "conversationScoped": true,
+    "description": "Raises a ticket for Darpan staff when the request needs code (a new cause, a missing field, a product bug, a display change) rather than a config change.",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "verbatimText"],
+      "properties": {
+        "category": {"type": "string", "enum": ["THRESHOLD_OR_WINDOW", "EXCLUSION", "STATEMENT_SCOPE", "FIX_WORDING", "CAUSE_STANCE",
+          "NEW_CHECK_EXISTING_READ", "NEW_OR_WIDER_CAUSE", "MISSING_FIELD", "NEW_SYSTEM_OR_PACK", "PRODUCT_BUG", "DISPLAY"]},
+        "verbatimText": {"type": "string", "description": "The person's own words, unchanged."},
+        "refs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "findingIds": {"type": "array", "items": {"type": "string"}},
+            "orderKeys": {"type": "array", "items": {"type": "string"}},
+            "statementCodes": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["field", "value", "source"],
+            "properties": {
+              "field": {"type": "string"},
+              "value": {"type": "string"},
+              "source": {"type": "string", "enum": ["HUMAN", "CONFIG", "TOOL"]}
+            }
+          }
+        },
+        "placement": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "lever": {"type": "string"},
+            "where": {"type": "string"}
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "ask_human",
+    "control": "QUESTION",
+    "description": "Asks the person one question the data cannot answer, optionally with choices. Ends this step until they answer.",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question"],
+      "properties": {
+        "question": {"type": "string"},
+        "options": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  },
+  {
+    "name": "request_more_evidence",
+    "control": "MORE_EVIDENCE",
+    "description": "Asks the investigator for one more piece of evidence before a change or ticket can be written. Ends this step.",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["need"],
+      "properties": {
+        "need": {"type": "string", "description": "What is missing, in one sentence."}
+      }
+    }
+  }
+]

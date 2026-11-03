@@ -1,0 +1,80 @@
+package darpan.agent.loop
+
+import groovy.transform.CompileStatic
+
+/**
+ * DAR-BE-159. One agent role's model, prompt, tools and budgets. Immutable; {@link #copy} makes a variant (a narrower tool
+ * list, a test prompt). The tool list is checked against the tool catalog, so a role can never name a tool that approves,
+ * rejects, reverts or plans a change.
+ */
+@CompileStatic
+final class RoleSpec {
+    static final String ROUTER = "ROUTER"
+    static final String INVESTIGATOR = "INVESTIGATOR"
+    static final String AUTHOR = "AUTHOR"
+
+    final String role
+    final String model
+    /** LOW, MEDIUM or HIGH (OutputConfig.effort). */
+    final String effort
+    final String systemPromptPath
+    final List<String> tools
+    final int maxRequests
+    final int maxToolCalls
+    final long wallClockMs
+    final long maxTokens
+    /** The router's structured output (a JSON schema); null for the other roles. */
+    final Map outputSchema
+
+    RoleSpec(Map args) {
+        role = args.role as String
+        model = args.model as String
+        effort = args.effort as String
+        systemPromptPath = args.systemPromptPath as String
+        tools = (((args.tools ?: []) as List).collect { it as String }).asImmutable()
+        maxRequests = args.maxRequests as int
+        maxToolCalls = args.maxToolCalls as int
+        wallClockMs = args.wallClockMs as long
+        maxTokens = args.maxTokens as long
+        outputSchema = args.outputSchema == null ? null : ((Map) args.outputSchema).asImmutable()
+        if (!(role in [ROUTER, INVESTIGATOR, AUTHOR])) throw new IllegalArgumentException("Unknown role: ${role}".toString())
+        if (!model || !effort || !systemPromptPath) throw new IllegalArgumentException("model, effort and systemPromptPath are required")
+        tools.each { String t ->
+            if (!AgentToolExecutor.TOOLS.containsKey(t)) throw new IllegalArgumentException("Tool ${t} is not in the agent's tool catalog".toString())
+        }
+    }
+
+    static RoleSpec router(Map outputSchema = null) {
+        return new RoleSpec(role: ROUTER, model: "claude-haiku-5-5", effort: "LOW", systemPromptPath: "darpan/agent/prompts/router.md",
+                tools: [], maxRequests: 1, maxToolCalls: 0, wallClockMs: 20_000L, maxTokens: 2_000L, outputSchema: outputSchema)
+    }
+
+    static RoleSpec investigator() {
+        return new RoleSpec(role: INVESTIGATOR, model: "claude-sonnet-5-5", effort: "MEDIUM", systemPromptPath: "darpan/agent/prompts/investigator.md",
+                tools: ["get_finding", "find_lookalikes", "inspect_record", "search_knowledge", "get_audit_settings"],
+                maxRequests: 12, maxToolCalls: 30, wallClockMs: 90_000L, maxTokens: 16_000L)
+    }
+
+    static RoleSpec author() {
+        return new RoleSpec(role: AUTHOR, model: "claude-opus-5-5", effort: "HIGH", systemPromptPath: "darpan/agent/prompts/author.md",
+                tools: ["propose_change", "raise_ticket", "ask_human", "request_more_evidence"],
+                maxRequests: 8, maxToolCalls: 6, wallClockMs: 120_000L, maxTokens: 32_000L)
+    }
+
+    /** This spec with some fields replaced, checked again. */
+    RoleSpec copy(Map changes) {
+        Map args = [role: role, model: model, effort: effort, systemPromptPath: systemPromptPath, tools: tools, maxRequests: maxRequests,
+                    maxToolCalls: maxToolCalls, wallClockMs: wallClockMs, maxTokens: maxTokens, outputSchema: outputSchema]
+        args.putAll(changes)
+        return new RoleSpec(args)
+    }
+
+    /** Sonnet and Opus think adaptively; Haiku (the router, low effort) sends no thinking config. */
+    boolean adaptiveThinking() { return !model.startsWith("claude-haiku") }
+
+    /** Server-side refusal fallbacks exist for Opus and Sonnet only. */
+    boolean serverFallbacks() { return model.startsWith("claude-opus") || model.startsWith("claude-sonnet") }
+
+    @Override
+    String toString() { return "RoleSpec(${role}, ${model})" }
+}
