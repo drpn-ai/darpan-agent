@@ -64,7 +64,7 @@ class PasteScrubberTests {
     void "an unquoted secret stops before trailing punctuation"() {
         assertEquals("password=[masked secret], next", PasteScrubber.scrub("password=hunter9, next").text)
         assertEquals("{token: [masked secret]}", PasteScrubber.scrub("{token: abc99}").text)
-        assertEquals("(secret=[masked secret]); done", PasteScrubber.scrub("(secret=zz11); done").text)
+        assertEquals("(secret=[masked secret] done", PasteScrubber.scrub("(secret=zz11); done").text, "; and ) may belong to the secret")
         assertEquals("password=[masked secret] then", PasteScrubber.scrub("password=ab,cd then").text, "a comma inside the value is masked with it")
     }
 
@@ -76,6 +76,68 @@ class PasteScrubberTests {
         assertEquals('{"Authorization":"Bearer [masked token]","x":1}', json.text)
         Map key = PasteScrubber.scrub('{"k":"sk-ant-api03-zz9","x":1}')
         assertEquals('{"k":"[masked API key]","x":1}', key.text)
+    }
+
+    @Test
+    void "a 20000-character quoted value is masked without an exception"() {
+        String value = "q" * 20_000
+        Map out = PasteScrubber.scrub('{"access_token": "' + value + '", "n": 1}')
+        assertEquals('{"access_token": "[masked secret]", "n": 1}', out.text)
+    }
+
+    @Test
+    void "a 20000-character unquoted run is masked quickly"() {
+        long t0 = System.nanoTime()
+        Map out = PasteScrubber.scrub("password=" + ("u7" * 10_000) + " tail")
+        assertEquals("password=[masked secret] tail", out.text)
+        assertTrue(System.nanoTime() - t0 < 2_000_000_000L, "took ${(System.nanoTime() - t0) / 1_000_000} ms")
+        long t1 = System.nanoTime()
+        PasteScrubber.scrub("x" * 20_000)
+        assertTrue(System.nanoTime() - t1 < 2_000_000_000L, "a plain long run took ${(System.nanoTime() - t1) / 1_000_000} ms")
+    }
+
+    @Test
+    void "a quoted value ending in a backslash, or escaping a newline, is masked to its end"() {
+        assertEquals('password: "[masked secret]', PasteScrubber.scrub('password: "abc\\').text)
+        Map out = PasteScrubber.scrub('password: "abc\\\ndef" tail')
+        assertEquals('password: "[masked secret]" tail', out.text)
+        assertFalse((out.text as String).contains("abc") || (out.text as String).contains("def"), out.text as String)
+    }
+
+    @Test
+    void "an unquoted value keeps its quotes, brackets and semicolons inside the mask"() {
+        Map q = PasteScrubber.scrub('token=ab"cd next')
+        assertEquals("token=[masked secret] next", q.text)
+        assertEquals("secret=[masked secret]", PasteScrubber.scrub("secret=abc)").text)
+        assertEquals("secret=[masked secret]", PasteScrubber.scrub("secret=abc]x").text)
+        assertEquals("secret=[masked secret]] next", PasteScrubber.scrub("secret=abc] next").text, "a trailing ] before space is JSON structure")
+    }
+
+    @Test
+    void "a quoted value with a comma and a brace inside is masked and the next key survives"() {
+        Map out = PasteScrubber.scrub('{"token":"x,y}z", "next":1}')
+        assertEquals('{"token":"[masked secret]", "next":1}', out.text)
+    }
+
+    @Test
+    void "camelCase secret keys are masked"() {
+        assertEquals("accessToken=[masked secret]", PasteScrubber.scrub("accessToken=zzz").text)
+        assertEquals("clientSecret: [masked secret]", PasteScrubber.scrub("clientSecret: zzz").text)
+        assertEquals('apiKey="[masked secret]"', PasteScrubber.scrub('apiKey="zzz"').text)
+        assertEquals("dbPassword=[masked secret] and privateKey: [masked secret]", PasteScrubber.scrub("dbPassword=p1 and privateKey: k2").text)
+    }
+
+    @Test
+    void "a bearer token is masked through any character up to whitespace"() {
+        assertEquals("Bearer [masked token],", PasteScrubber.scrub("Bearer ab%cd!ef,").text)
+        assertEquals("Bearer [masked token]", PasteScrubber.scrub("Bearer ab%cd!ef").text)
+    }
+
+    @Test
+    void "a key with no value masks nothing more and does not throw"() {
+        assertEquals("password:", PasteScrubber.scrub("password:").text)
+        assertEquals('token: ""', PasteScrubber.scrub('token: ""').text)
+        assertEquals("password=   ", PasteScrubber.scrub("password=   ").text)
     }
 
     @Test
