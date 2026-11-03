@@ -101,7 +101,7 @@ class AgentToolExecutor {
     /**
      * What the author's model reads of a write tool's result (spec 10.3: the author never reads raw tool text). The full
      * result stays in content, for the transcript; the model gets typed fields only: propose_change {proposalId, status,
-     * statusMessage, provenanceStatus, blockedCount, backtest {supported, reason, closedCount, openedCount, limits}} (no
+     * statusCode (STATUS_CODES, never the free-text statusMessage), provenanceStatus, blockedCount, backtest {supported, reason, closedCount, openedCount, limits}} (no
      * finding ids, record keys or exception detail), raise_ticket {ticketId, duplicate}, and a fixed TOOL_ERROR for any
      * error the service reported.
      */
@@ -113,7 +113,7 @@ class AgentToolExecutor {
         Map o = (Map) out
         if (toolName == "propose_change") {
             Map bt = o.backtest instanceof Map ? (Map) o.backtest : null
-            return JsonOutput.toJson([proposalId: token(o.proposalId), status: token(o.status), statusMessage: (o.statusMessage as String)?.take(300),
+            return JsonOutput.toJson([proposalId: token(o.proposalId), status: token(o.status), statusCode: statusCode(o),
                     provenanceStatus: token(o.provenanceStatus), blockedCount: o.blockedIds instanceof List ? ((List) o.blockedIds).size() : 0,
                     backtest: bt == null ? null : [supported: bt.supported == true, reason: token(bt.reason),
                             closedCount: bt.closed instanceof List ? ((List) bt.closed).size() : 0,
@@ -122,6 +122,24 @@ class AgentToolExecutor {
         }
         if (toolName == "raise_ticket") return JsonOutput.toJson([ticketId: token(o.ticketId), duplicate: o.duplicate == true])
         return TOOL_ERROR
+    }
+
+    /** The closed set the author reads in place of a proposal's free-text statusMessage. */
+    static final List<String> STATUS_CODES = ["EDITOR_MESSAGE", "STALE", "UNSAFE_TREE", "INVALID"].asImmutable()
+
+    /**
+     * A proposal's status as a code: from its status, plus, for an INVALID one, whether the pipeline marked it with its own
+     * unsafe-tree constant (an identity check against Darpan's constant, not a reading of the text). PLANNED has none;
+     * anything else is INVALID.
+     */
+    static String statusCode(Map out) {
+        switch (out.status as String) {
+            case "PLANNED": return null
+            case "DRAFT": return "EDITOR_MESSAGE"
+            case "STALE": return "STALE"
+            case "INVALID": return out.statusMessage == darpan.agent.pipeline.AuditChangeLevers.UNSAFE_TREE_MESSAGE ? "UNSAFE_TREE" : "INVALID"
+            default: return "INVALID"
+        }
     }
 
     private static String token(Object v) {

@@ -482,13 +482,16 @@ class AgentOrchestrator {
     // ---------------------------------------------------------------- limits
 
     /**
-     * Router runs (one per accepted message) the person started in the last hour, in any tenant: one count over the turn
-     * joined to its conversation's userId (darpan.agent.AgentTurnOfUser).
+     * Router runs (one per accepted message) the person started in the last hour, in any tenant they may enter: one count
+     * over the turn joined to its conversation's userId (darpan.agent.AgentTurnOfUser), with an explicit tenant condition.
      */
     static long turnsInLastHour(def ec, String userId) {
+        // The limit spans tenants, but the read still names them: the tenants this person may enter, explicitly.
+        List<String> tenants = TenantAccessSupport.listAvailableTenants(ec).collect { it.userGroupId as String }.findAll { it }
+        if (!tenants) return 0L
         Timestamp since = new Timestamp(System.currentTimeMillis() - 3_600_000L)
-        return TenantScopedFinder.findGlobalUnscoped(ec, "darpan.agent.AgentTurnOfUser", "agent rate limit: the person's own turns, every tenant")
-                .condition("userId", userId).condition("role", RoleSpec.ROUTER)
+        return TenantScopedFinder.findGlobalUnscoped(ec, "darpan.agent.AgentTurnOfUser", "agent rate limit: the person's own turns in their tenants")
+                .condition("companyUserGroupId", EntityCondition.IN, tenants).condition("userId", userId).condition("role", RoleSpec.ROUTER)
                 .condition("startedDate", EntityCondition.GREATER_THAN_EQUAL_TO, since).useCache(false).count()
     }
 
