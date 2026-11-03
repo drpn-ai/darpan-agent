@@ -1,11 +1,14 @@
 package darpan.agent.claude
 
 import com.anthropic.client.AnthropicClient
+import com.anthropic.core.RequestOptions
 import com.anthropic.core.http.StreamResponse
 import com.anthropic.helpers.MessageAccumulator
 import com.anthropic.models.messages.Message
 import com.anthropic.models.messages.MessageCreateParams
 import com.anthropic.models.messages.RawMessageStreamEvent
+
+import java.time.Duration
 
 /**
  * Streams the response (long outputs and thinking need it) and returns the accumulated final message. The client is
@@ -34,6 +37,12 @@ class AnthropicModelGateway implements ModelGateway {
 
     @Override
     Message send(MessageCreateParams params) {
+        return send(params, null)
+    }
+
+    /** Each attempt (the client retries twice) is bounded by timeout when one is given. */
+    @Override
+    Message send(MessageCreateParams params, Duration timeout) {
         AnthropicClient client
         try {
             client = clientSupplier.call()
@@ -42,7 +51,8 @@ class AnthropicModelGateway implements ModelGateway {
             throw new ModelUnavailableException(e.message, e)
         }
         if (client == null) throw new ModelUnavailableException("No Claude API key is configured")
-        return accumulate(client.messages().createStreaming(params))
+        if (timeout == null) return accumulate(client.messages().createStreaming(params))
+        return accumulate(client.messages().createStreaming(params, RequestOptions.builder().timeout(timeout).build()))
     }
 
     /** Folds the stream into the final message and always closes it, including when the stream throws mid-way. */

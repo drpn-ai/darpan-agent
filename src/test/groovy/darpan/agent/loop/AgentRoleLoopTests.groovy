@@ -139,13 +139,15 @@ class AgentRoleLoopTests {
 
     private void upsert(String entityName, Map<String, Object> fields) { ec.entity.makeValue(entityName).setAll(fields).createOrUpdate() }
 
-    private String turn(RoleSpec spec) { AgentUsageLedger.startTurn(ec, CONV, spec.role, spec.model) }
+    private String turn(RoleSpec spec) { AgentUsageLedger.startTurn(ec, MINE, CONV, spec.role, spec.model) }
 
     private RoleResult run(RoleSpec spec, ScriptedGateway gateway, CountingLoop loop = new CountingLoop(), List<MessageParam> messages = ask("Why is F-1 open?")) {
         return loop.runRole(ec, spec, MINE, messages, gateway, turn(spec))
     }
 
     private long count(String entityName) { ec.entity.find(entityName).useCache(false).count() }
+
+    private def turnRow(String turnId) { ec.entity.find("darpan.agent.AgentTurn").condition("turnId", turnId).useCache(false).one() }
 
     // ------------------------------------------------------------------ tests
 
@@ -289,9 +291,11 @@ class AgentRoleLoopTests {
             actAs(MINE)
         }
         def again = new ScriptedGateway([msg("end_turn", [text("ok")])])
+        String turnId = turn(investigator())
         actAs(OTHER)
         try {
-            RoleResult r2 = new CountingLoop().runRole(ec, investigator(), MINE, ask("x"), again, AgentUsageLedger.startTurn(ec, CONV, "INVESTIGATOR", "claude-sonnet-5-5"))
+            assertThrows(TenantChangedException) { AgentUsageLedger.startTurn(ec, MINE, CONV, "INVESTIGATOR", "claude-sonnet-5-5") }
+            RoleResult r2 = new CountingLoop().runRole(ec, investigator(), MINE, ask("x"), again, turnId)
             assertEquals("TENANT_CHANGED", r2.outcome, "a turn whose tenant is no longer active sends nothing")
             assertEquals(0, again.sent.size())
         } finally {
@@ -316,9 +320,89 @@ class AgentRoleLoopTests {
     }
 
     @Test
-    void "a 400 is a programming error and is not hidden as UNAVAILABLE"() {
+    void "a 400 is a programming error, is not hidden as UNAVAILABLE, and closes the turn as ERROR"() {
         def e400 = BadRequestException.builder().headers(Headers.builder().build()).body(JsonValue.from([:])).build()
-        assertThrows(BadRequestException) { run(investigator(), new ScriptedGateway([e400])) }
+        String turnId = turn(investigator())
+        assertThrows(BadRequestException) { new CountingLoop().runRole(ec, investigator(), MINE, ask("x"), new ScriptedGateway([e400]), turnId) }
+        def row = turnRow(turnId)
+        assertEquals("ERROR", row.outcome)
+        assertNotNull(row.endedDate)
+    }
+
+    @Test
+    void "a missing or unknown stop reason ends ERROR, stop_sequence ends DONE"() {
+        assertEquals("ERROR", run(investigator(), new ScriptedGateway([msg(null, [text("half")])])).outcome)
+        assertEquals("ERROR", run(investigator(), new ScriptedGateway([msg("something_new", [text("?")])])).outcome)
+        assertEquals("DONE", run(investigator(), new ScriptedGateway([msg("stop_sequence", [text("ok")])])).outcome)
+    }
+
+    @Test
+    void "a tenant switched between requests still has both requests priced on the pinned tenant's turn"() {
+        Map usage = [input_tokens: 1000, output_tokens: 200]
+        def gateway = new ScriptedGateway([
+                msg("tool_use", [toolUse("tu_1", "search_knowledge", [words: "a"])], usage),
+                { actAs(OTHER); msg("tool_use", [toolUse("tu_2", "search_knowledge", [words: "b"])], usage) }])
+        String turnId = turn(investigator())
+        try {
+            RoleResult r = new CountingLoop().runRole(ec, investigator(), MINE, ask("x"), gateway, turnId)
+            assertEquals("TENANT_CHANGED", r.outcome)
+            def row = turnRow(turnId)
+            assertEquals(2L, row.requestCount as long)
+            assertEquals(8000L, row.costMicros as long, "1000*2 + 200*10 twice")
+            assertEquals("TENANT_CHANGED", row.outcome)
+            assertEquals(MINE, row.companyUserGroupId)
+            assertEquals(8000L, AgentUsageLedger.todayCostMicros(ec, MINE), "counted for the pinned tenant while another is active")
+        } finally {
+            actAs(MINE)
+        }
+    }
+
+    @Test
+    void "a tool reports only the errors it added and earlier errors survive it"() {
+        ec.message.addError("EARLIER")
+        try {
+            def ex = new AgentToolExecutor(investigator(), CONV)
+            Map out = ex.execute(ec, MINE, "get_audit_settings", [audit: "no-such-audit"])
+            assertTrue(out.isError as boolean)
+            assertTrue((out.content as String).contains("no-such-audit"), out.content as String)
+            assertFalse((out.content as String).contains("EARLIER"), out.content as String)
+            assertEquals(["EARLIER"], ec.message.errors)
+            Map ok = ex.execute(ec, MINE, "search_knowledge", [words: "carrier"])
+            assertFalse(ok.isError as boolean, ok.content as String)
+            assertEquals(["EARLIER"], ec.message.errors)
+        } finally {
+            ec.message.clearErrors()
+        }
+    }
+
+    @Test
+    void "a catalog entry for a service that is not get, find, inspect, search or create refuses to load"() {
+        Map schema = [type: "object", additionalProperties: false, properties: [:]]
+        ["facade.AgentChangeFacadeServices.Apply#AuditChange", "facade.AgentChangeFacadeServices.apply#AuditChange",
+         "facade.AgentChangeFacadeServices.REVERT#AuditChange", "facade.X.update#Thing", "facade.X.delete#Thing", "noVerbHere"].each { String svc ->
+            assertThrows(IllegalStateException, { AgentToolExecutor.parseCatalog([[name: "t", service: svc, input_schema: schema]]) }, svc)
+        }
+        assertEquals(["t"], AgentToolExecutor.parseCatalog([[name: "t", service: "facade.X.Get#Thing", input_schema: schema]]).keySet().toList())
+        assertThrows(IllegalStateException) { AgentToolExecutor.parseCatalog([[name: "t", service: "facade.X.get#A", control: "QUESTION"]]) }
+    }
+
+    @Test
+    void "a control tool before another call answers the later call NOT_RUN without running it"() {
+        def gateway = new ScriptedGateway([msg("tool_use", [
+                toolUse("tu_1", "ask_human", [question: "Which store?"]),
+                toolUse("tu_2", "propose_change", [kind: "FIX_TEXT", target: [savedRunId: "R1", conclusionCode: "C1"],
+                        after: [fixActionTemplate: "Re-send it."], reasonText: "x", evidence: []])])])
+        def loop = new CountingLoop()
+        RoleResult r = run(author(), gateway, loop)
+        assertEquals("QUESTION", r.outcome)
+        assertEquals("tu_1", r.control.toolUseId)
+        assertEquals([], loop.executor.invoked, "propose_change never runs")
+        assertEquals(0L, count("darpan.agent.AuditChangeProposal"))
+        assertEquals(1, r.pendingToolResults.size())
+        def pending = r.pendingToolResults[0].asToolResult()
+        assertEquals("tu_2", pending.toolUseId())
+        assertTrue(pending.isError().orElse(false))
+        assertEquals("NOT_RUN: step ended on ask_human", pending.content().get().asString())
     }
 
     @Test

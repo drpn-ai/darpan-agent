@@ -24,8 +24,12 @@ class AgentToolExecutor {
     static final String TOOL_FAILED = "TOOL_FAILED"
     /** A tool result longer than this is cut, so one large read cannot fill the context. */
     static final int MAX_RESULT_CHARS = 60_000
-    /** Verbs only a person may call; a catalog naming one of these does not load. */
-    static final List<String> PERSON_ONLY_VERBS = ["apply", "reject", "revert", "plan"].asImmutable()
+    /**
+     * The only service verbs a tool may map to (compared case-insensitively). Anything else, apply, reject, revert, plan,
+     * update, delete, does not load, so a catalog edit cannot hand the agent a person-only service.
+     */
+    static final List<String> ALLOWED_VERBS = ["get", "find", "inspect", "search", "create"].asImmutable()
+    private static final java.util.regex.Pattern VERB = java.util.regex.Pattern.compile(/\.([A-Za-z]+)#[A-Za-z0-9_]+$/)
 
     /** name -> [name, service, control, conversationScoped, description, input_schema], in catalog order. */
     static final Map<String, Map> TOOLS = loadCatalog()
@@ -69,21 +73,24 @@ class AgentToolExecutor {
         if (tool.conversationScoped) params.conversationId = conversationId
         String service = tool.service as String
         return AgentCallMarker.run {
-            Map out
+            // Errors already on ec.message are set aside for the call and put back after it, so the call is not refused
+            // because of them, and only the errors this call added are reported (and then cleared).
+            ec.message.pushErrors()
             try {
-                out = invoke(ec, service, params)
-            } catch (Exception e) {
-                // A failing tool is the model's to read and work around, not the turn's end; the stack goes to the log only.
-                logger.warn("Agent tool ${toolName} (${service}) failed".toString(), e)
+                Map out
+                try {
+                    out = invoke(ec, service, params)
+                } catch (Exception e) {
+                    // A failing tool is the model's to read and work around, not the turn's end; the stack goes to the log only.
+                    logger.warn("Agent tool ${toolName} (${service}) failed".toString(), e)
+                    return [isError: true, content: TOOL_FAILED]
+                }
+                if (ec.message.hasError()) return [isError: true, content: cap("ERROR: " + ec.message.getErrorsString())]
+                return [isError: false, content: cap(JsonOutput.toJson(out ?: [:]))]
+            } finally {
                 ec.message.clearErrors()
-                return [isError: true, content: TOOL_FAILED]
+                ec.message.popErrors()
             }
-            if (ec.message.hasError()) {
-                String errors = ec.message.getErrorsString()
-                ec.message.clearErrors()
-                return [isError: true, content: cap("ERROR: " + errors)]
-            }
-            return [isError: false, content: cap(JsonOutput.toJson(out ?: [:]))]
         }
     }
 
@@ -149,19 +156,26 @@ class AgentToolExecutor {
     private static Map<String, Map> loadCatalog() {
         InputStream stream = AgentToolExecutor.class.classLoader.getResourceAsStream(CATALOG)
         if (stream == null) throw new IllegalStateException("Agent tool catalog ${CATALOG} is missing".toString())
-        List<Map> entries
         try {
-            entries = (List<Map>) ObjectMappers.jsonMapper().readValue(stream, List)
+            return parseCatalog((List<Map>) ObjectMappers.jsonMapper().readValue(stream, List))
         } finally {
             stream.close()
         }
+    }
+
+    /** Checks catalog entries: a name, and either a control or a service whose verb is in {@link #ALLOWED_VERBS}. */
+    static Map<String, Map> parseCatalog(List<Map> entries) {
         Map<String, Map> out = new LinkedHashMap<>()
         entries.each { Map t ->
             String name = t.name as String
             String service = t.service as String
-            if (!name || (!service && !t.control)) throw new IllegalStateException("Agent tool entry needs a name and a service or control: ${t}".toString())
-            if (service && PERSON_ONLY_VERBS.any { String verb -> service.contains(".${verb}#") })
-                throw new IllegalStateException("Agent tool ${name} maps to ${service}, which only a person may call".toString())
+            if (!name || (!service && !t.control) || (service && t.control))
+                throw new IllegalStateException("Agent tool entry needs a name and exactly one of service or control: ${t}".toString())
+            if (service) {
+                def m = VERB.matcher(service)
+                if (!m.find() || !(m.group(1).toLowerCase(Locale.ROOT) in ALLOWED_VERBS))
+                    throw new IllegalStateException("Agent tool ${name} maps to ${service}; a tool may only map to a ${ALLOWED_VERBS.join('/')} service".toString())
+            }
             if (out.containsKey(name)) throw new IllegalStateException("Agent tool ${name} is listed twice".toString())
             out[name] = t.asImmutable()
         }
