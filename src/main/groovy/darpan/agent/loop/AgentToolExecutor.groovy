@@ -157,7 +157,32 @@ class AgentToolExecutor {
         InputStream stream = AgentToolExecutor.class.classLoader.getResourceAsStream(CATALOG)
         if (stream == null) throw new IllegalStateException("Agent tool catalog ${CATALOG} is missing".toString())
         try {
-            return parseCatalog((List<Map>) ObjectMappers.jsonMapper().readValue(stream, List))
+            return parseCatalog(((List<Map>) ObjectMappers.jsonMapper().readValue(stream, List)).collect { Map t -> withSchema(t) })
+        } finally {
+            stream.close()
+        }
+    }
+
+    /**
+     * An entry's input_schema, inline or (input_schema_resource) read from a schema file, so a schema the orchestrator also
+     * validates against exists once (darpan/agent/schemas/propose-change.json, raise-ticket.json).
+     */
+    private static Map withSchema(Map t) {
+        String path = t.input_schema_resource as String
+        if (!path) return t
+        if (t.input_schema != null) throw new IllegalStateException("Agent tool ${t.name} has both input_schema and input_schema_resource".toString())
+        Map out = new LinkedHashMap(t)
+        out.remove("input_schema_resource")
+        out.input_schema = schemaResource(path)
+        return out
+    }
+
+    /** A JSON schema on the classpath, as a Map. */
+    static Map schemaResource(String path) {
+        InputStream stream = AgentToolExecutor.class.classLoader.getResourceAsStream(path)
+        if (stream == null) throw new IllegalStateException("Agent schema ${path} is missing".toString())
+        try {
+            return (Map) ObjectMappers.jsonMapper().readValue(stream, Map)
         } finally {
             stream.close()
         }

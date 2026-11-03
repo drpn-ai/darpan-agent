@@ -71,128 +71,15 @@
     "name": "propose_change",
     "service": "facade.AgentChangeFacadeServices.create#AuditChangeProposal",
     "conversationScoped": true,
-    "description": "Drafts one change to the audit's config for a person to approve. Nothing changes until a person applies it. target and after carry only the keys of the kind: EXCLUSION_FILTER target {savedRunId, fileSide} after {fieldExpression, operator, filterValues, fieldLabel}; STATEMENT_NARROWING target {auditId, checkCode, statementCode} after {diffTypes, conclusionCodes, ruleIds}; FIX_TEXT target {savedRunId, conclusionCode} after {fixActionTemplate}; CONCLUSION_ROWS target {savedRunId} after {rows}.",
-    "input_schema": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["kind", "target", "after", "reasonText", "evidence"],
-      "properties": {
-        "kind": {"type": "string", "enum": ["EXCLUSION_FILTER", "STATEMENT_NARROWING", "FIX_TEXT", "CONCLUSION_ROWS"]},
-        "target": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "savedRunId": {"type": "string"},
-            "fileSide": {"type": "string", "enum": ["FILE_1", "FILE_2"]},
-            "auditId": {"type": "string"},
-            "checkCode": {"type": "string"},
-            "statementCode": {"type": "string"},
-            "conclusionCode": {"type": "string"}
-          }
-        },
-        "after": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "fieldExpression": {"type": "string"},
-            "operator": {"type": "string"},
-            "filterValues": {"type": "array", "items": {"type": "string"}},
-            "fieldLabel": {"type": "string"},
-            "diffTypes": {"type": "array", "items": {"type": "string"}},
-            "conclusionCodes": {"type": "array", "items": {"type": "string"}},
-            "ruleIds": {"type": "array", "items": {"type": "string"}},
-            "fixActionTemplate": {"type": "string"},
-            "rows": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["conclusionCode"],
-                "properties": {
-                  "conclusionCode": {"type": "string"},
-                  "parentConclusionCode": {"type": "string"},
-                  "bucket": {"type": "string"},
-                  "fixActionTemplate": {"type": "string"},
-                  "conditions": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": ["fieldExpression", "operator"],
-                      "properties": {
-                        "fieldExpression": {"type": "string"},
-                        "operator": {"type": "string"},
-                        "checkValue": {"type": "string"}
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "reasonText": {"type": "string", "description": "Why, citing finding ids, record keys or fields."},
-        "evidence": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["field", "value", "source"],
-            "properties": {
-              "field": {"type": "string"},
-              "value": {"type": "string"},
-              "source": {"type": "string", "enum": ["HUMAN", "CONFIG", "TOOL"]}
-            }
-          }
-        }
-      }
-    }
+    "description": "Drafts one change to the audit's config for a person to approve. Nothing changes until a person applies it. target and after carry only the keys of the kind (see their descriptions). Every record id in after must be one the person typed, the open finding's own, or already in the config; any other id blocks the draft.",
+    "input_schema_resource": "darpan/agent/schemas/propose-change.json"
   },
   {
     "name": "raise_ticket",
     "service": "facade.AgentChangeFacadeServices.create#BrainChangeTicket",
     "conversationScoped": true,
-    "description": "Raises a ticket for Darpan staff when the request needs code (a new cause, a missing field, a product bug, a display change) rather than a config change.",
-    "input_schema": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["category", "verbatimText"],
-      "properties": {
-        "category": {"type": "string", "enum": ["THRESHOLD_OR_WINDOW", "EXCLUSION", "STATEMENT_SCOPE", "FIX_WORDING", "CAUSE_STANCE",
-          "NEW_CHECK_EXISTING_READ", "NEW_OR_WIDER_CAUSE", "MISSING_FIELD", "NEW_SYSTEM_OR_PACK", "PRODUCT_BUG", "DISPLAY"]},
-        "verbatimText": {"type": "string", "description": "The person's own words, unchanged."},
-        "refs": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "findingIds": {"type": "array", "items": {"type": "string"}},
-            "orderKeys": {"type": "array", "items": {"type": "string"}},
-            "statementCodes": {"type": "array", "items": {"type": "string"}}
-          }
-        },
-        "evidence": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["field", "value", "source"],
-            "properties": {
-              "field": {"type": "string"},
-              "value": {"type": "string"},
-              "source": {"type": "string", "enum": ["HUMAN", "CONFIG", "TOOL"]}
-            }
-          }
-        },
-        "placement": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "lever": {"type": "string"},
-            "where": {"type": "string"}
-          }
-        }
-      }
-    }
+    "description": "Raises a ticket for Darpan staff when the request needs code (a new or wider cause, a missing field, a new system, a product bug, a display change) or a lever the tenant cannot change yet, rather than a config change.",
+    "input_schema_resource": "darpan/agent/schemas/raise-ticket.json"
   },
   {
     "name": "ask_human",

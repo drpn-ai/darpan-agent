@@ -1,0 +1,44 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["category", "verbatimText"],
+  "properties": {
+    "category": {"type": "string", "enum": ["THRESHOLD_OR_WINDOW", "EXCLUSION", "STATEMENT_SCOPE", "FIX_WORDING", "CAUSE_STANCE",
+      "NEW_CHECK_EXISTING_READ", "NEW_OR_WIDER_CAUSE", "MISSING_FIELD", "NEW_SYSTEM_OR_PACK", "PRODUCT_BUG", "DISPLAY"]},
+    "verbatimText": {"type": "string", "description": "The person's own words, unchanged."},
+    "refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "findingIds": {"type": "array", "items": {"type": "string"}},
+        "orderKeys": {"type": "array", "items": {"type": "string"}},
+        "statementCodes": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "value", "source"],
+        "properties": {
+          "field": {"type": "string"},
+          "value": {"type": "string"},
+          "source": {"type": "string", "enum": ["HUMAN", "CONFIG", "TOOL"]}
+        }
+      }
+    },
+    "placement": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where the change would sit in the brain, as codes only.",
+      "properties": {
+        "subject": {"type": "string", "enum": ["ORDER", "LINE", "RETURN", "SHIPMENT", "PAYMENT", "PRODUCT", "TRANSFER", "OTHER"]},
+        "stance": {"type": "string", "enum": ["EXPECTED", "FIX_OWED"]},
+        "statementCodes": {"type": "array", "items": {"type": "string"}},
+        "reuseConclusionCode": {"type": "string", "description": "An existing conclusion code from the catalog this extends, if any."},
+        "dataPlan": {"type": "string", "enum": ["REUSE_READ", "NEW_FIELD", "QUESTION"]}
+      }
+    }
+  }
+}

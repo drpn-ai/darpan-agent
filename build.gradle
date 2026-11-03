@@ -56,7 +56,16 @@ dependencies {
 
 check.dependsOn.clear()
 
-test { useJUnitPlatform() }
+test {
+    useJUnitPlatform()
+    // Each test class boots its own Moqui (ReconciliationSmokeTestSupport.initMoqui), as core's tests do.
+    forkEvery = 1
+    // R6: the prompt leak test reads the private tenant identifier list (and allow phrases) only from here; without it the
+    // test is skipped, not passed. DARPAN_AGENT_LEAK_LIST = path(s) separated by the path separator: *.json identifiers, *.txt
+    // allow phrases.
+    def leakList = System.getenv('DARPAN_AGENT_LEAK_LIST')
+    if (leakList) systemProperty 'darpan.agent.leakListPath', leakList
+}
 
 task cleanLib(type: Delete) { delete fileTree(dir: projectDir.absolutePath + '/lib', include: '*') }
 clean.dependsOn cleanLib

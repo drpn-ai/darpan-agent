@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["facts", "answer"],
+  "properties": {
+    "facts": {
+      "type": "array",
+      "description": "Typed facts only: ids, codes, states, amounts, dates, counts. One value per fact, never a sentence.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["item", "field", "value", "source"],
+        "properties": {
+          "item": {"type": "integer", "description": "The router item this fact grounds, counted from 0."},
+          "subject": {"type": "string", "description": "The finding id or record key the fact is about."},
+          "field": {"type": "string", "description": "A field name, for example findingId, recordKey, state, conclusionCode, checkCode, statementCode, savedRunId, fileSide, fieldExpression, amount, date, lookalikeCount, controlCount, conflict."},
+          "value": {"type": "string", "description": "The value, as one token."},
+          "source": {"type": "string", "enum": ["HUMAN", "CONFIG", "TOOL"], "description": "HUMAN: the person typed it. CONFIG: the audit's settings. TOOL: a record or finding read."}
+        }
+      }
+    },
+    "answer": {"type": "string", "description": "For an EXPLAIN or INVESTIGATION_PASTE item: the plain-text answer, citing finding ids, record keys or fields. Otherwise empty."}
+  }
+}

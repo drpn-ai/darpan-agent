@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-BE-159. The embedded agent's one entry point (darpan.agent.AgentOrchestrator). The tenant is the session's active
+         tenant, pinned for the whole request; no parameter names one. Answers in the request (overall cap 240 s), so it
+         runs outside a service transaction: every row it writes commits on its own, and the tools run in their own. -->
+
+    <service verb="send" noun="AgentTurn" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
+        <description>One message from the person about an audit, optionally with a finding open. The router splits it into
+            items; read questions are grounded and answered; cause and rule comments become one draft change (for a person to
+            approve with apply#AuditChange) or a staff ticket. Keys, secrets, emails and phones are masked before anything is
+            stored or sent. outcome: AGENT_OFF, AGENT_UNAVAILABLE, RATE_LIMITED, OVER_BUDGET, DECLINED, QUESTION, DONE,
+            INCOMPLETE, TENANT_CHANGED or ERROR.</description>
+        <in-parameters>
+            <parameter name="conversationId"><description>Continue this conversation; empty starts one.</description></parameter>
+            <parameter name="auditId" required="true"/>
+            <parameter name="findingId"><description>The finding the panel is open on.</description></parameter>
+            <!-- Pasted investigations may hold angle brackets; the text is stored and shown as plain text, never as HTML. -->
+            <parameter name="text" required="true" allow-html="any"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="conversationId"/>
+            <parameter name="outcome"/>
+            <parameter name="reply"/>
+            <parameter name="proposals" type="List"><description>{proposalId, kind, status, statusMessage, provenanceStatus, blockedIds, backtest}</description></parameter>
+            <parameter name="tickets" type="List"><description>{ticketId, category, duplicate}</description></parameter>
+            <parameter name="question" type="Map"><description>{text, options, from} when the agent needs the person's answer.</description></parameter>
+            <parameter name="masked" type="List"><description>The kinds of secret or personal data masked in the text (never the values).</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="turn" from="darpan.agent.AgentOrchestrator.forRequest(ec).send(ec, conversationId, auditId, findingId, text)"/>
+            <if condition="turn == null || ec.message.hasError()"><return error="true"/></if>
+            <set field="conversationId" from="turn.conversationId"/>
+            <set field="outcome" from="turn.outcome"/>
+            <set field="reply" from="turn.reply"/>
+            <set field="proposals" from="turn.proposals"/>
+            <set field="tickets" from="turn.tickets"/>
+            <set field="question" from="turn.question"/>
+            <set field="masked" from="turn.masked"/>
+        </actions>
+    </service>
+
+</services>

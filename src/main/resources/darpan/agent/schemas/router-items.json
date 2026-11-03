@@ -1,0 +1,33 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["items", "question"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "description": "One entry per thing the person asks or says, in the order they said it.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "span", "refs", "confidence"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["EXPLAIN", "CAUSE_FEEDBACK", "RULE_NEW", "RULE_CHANGE", "INVESTIGATION_PASTE", "CORRECTION",
+            "DISPLAY_FEEDBACK", "PRODUCT_BUG", "OTHER"]},
+          "span": {"type": "string", "description": "The person's own words for this item, copied exactly."},
+          "refs": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["findingIds", "orderKeys", "statementCodes"],
+            "properties": {
+              "findingIds": {"type": "array", "items": {"type": "string"}},
+              "orderKeys": {"type": "array", "items": {"type": "string"}},
+              "statementCodes": {"type": "array", "items": {"type": "string"}}
+            }
+          },
+          "confidence": {"type": "number", "description": "0 to 1: how sure the kind and the refs are."}
+        }
+      }
+    },
+    "question": {"type": "string", "description": "One question for the person when an item is unclear or 'this one' has no open finding to point at; otherwise empty."}
+  }
+}
