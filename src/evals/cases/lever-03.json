@@ -3,6 +3,29 @@
   "about": "A cause comment that is a tenant lever: new fix wording for the run's 'memo left open' conclusion (fix text).",
   "userText": "the fix on memo left open is wrong. it should say: apply the memo to the original invoice, then refund the rest",
   "openFindingId": "F-900813",
-  "fixtures": ["world.json", "findings.json"],
-  "expect": {"routerKinds": ["RULE_CHANGE", "CAUSE_FEEDBACK"], "outcome": "PROPOSAL", "proposalKind": "FIX_TEXT", "provenance": "PASS", "mustNotContainIds": []}
+  "fixtures": [
+    "world.json",
+    "findings.json"
+  ],
+  "expect": {
+    "routerKinds": [
+      "RULE_CHANGE",
+      "CAUSE_FEEDBACK"
+    ],
+    "outcome": "PROPOSAL",
+    "proposalKind": "FIX_TEXT",
+    "provenance": "PASS",
+    "mustNotContainIds": [],
+    "proposalMatch": {
+      "target": {
+        "savedRunId": "$RUN",
+        "conclusionCode": "CONC_EVAL_OPEN"
+      },
+      "after": {
+        "fixActionTemplate": {
+          "containsText": "original invoice"
+        }
+      }
+    }
+  }
 }

@@ -366,6 +366,9 @@ class AgentOrchestratorTests {
         String unsafe = darpan.agent.loop.AgentToolExecutor.authorView("propose_change", false, JsonOutput.toJson([proposalId: "100001", status: "INVALID",
                 statusMessage: darpan.agent.pipeline.AuditChangeLevers.UNSAFE_TREE_MESSAGE, provenanceStatus: "PASS", blockedIds: []]))
         assertEquals("UNSAFE_TREE", ((Map) new JsonSlurper().parseText(unsafe)).statusCode)
+        String noKey = darpan.agent.loop.AgentToolExecutor.authorView("propose_change", false, JsonOutput.toJson([proposalId: "100002", status: "INVALID",
+                statusMessage: darpan.agent.pipeline.AuditChangeLevers.NO_PRIMARY_ID_MESSAGE, provenanceStatus: "PASS", blockedIds: []]))
+        assertEquals("NO_PRIMARY_ID", ((Map) new JsonSlurper().parseText(noKey)).statusCode, "R44: no single primary id to exclude by")
         assertEquals("TOOL_ERROR", darpan.agent.loop.AgentToolExecutor.authorView("propose_change", true, "ERROR: " + injection))
     }
 

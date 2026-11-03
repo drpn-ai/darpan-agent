@@ -71,7 +71,8 @@ test {
 // or `check` (nothing depends on it; the runner is a main class with no tests, so `test` never executes it). Without
 // -PagentEvalConfirm=yes it boots Moqui, seeds the synthetic tenant, prints a cost estimate measured offline (a recording
 // gateway; no request is sent) and stops. With it, every case runs 3 times against the real Claude API (key from the
-// environment, ANTHROPIC_API_KEY) and the report goes to build/agent-eval/<timestamp>/. Spend stops at
+// environment, ANTHROPIC_API_KEY) and the report goes to build/agent-eval/<timestamp>/ (runs.jsonl as each run ends; an
+// ABORTED report.json/report.md if it is stopped early). Spend stops at
 // -PagentEvalBudgetUsd (default 25, applied as the eval tenant's daily cap). -PagentEvalCases=id,id runs a subset (no gate).
 tasks.register('agentEval', JavaExec) {
     group = 'darpan agent'
@@ -81,7 +82,8 @@ tasks.register('agentEval', JavaExec) {
     mainClass = 'darpan.agent.evals.AgentEvalRunner'
     workingDir = projectDir
     javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
-    systemProperty 'darpan.agent.evalConfirm', (project.findProperty('agentEvalConfirm') ?: '').toString()
+    // The confirm is read from this command line only (-P), never from gradle.properties or ORG_GRADLE_PROJECT_* env.
+    systemProperty 'darpan.agent.evalConfirm', gradle.startParameter.projectProperties['agentEvalConfirm'] == 'yes' ? 'yes' : ''
     systemProperty 'darpan.agent.evalDir', file('src/evals').absolutePath
     systemProperty 'darpan.agent.evalReportDir', layout.buildDirectory.dir('agent-eval').get().asFile.absolutePath
     if (project.hasProperty('agentEvalBudgetUsd')) systemProperty 'darpan.agent.evalBudgetUsd', project.property('agentEvalBudgetUsd').toString()

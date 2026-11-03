@@ -20,7 +20,7 @@
     "after": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Only the keys of the kind: EXCLUSION_FILTER {fieldExpression (required), operator (default EXCLUDE_IN), filterValues (required, not empty)}; STATEMENT_NARROWING {diffTypes, conclusionCodes, ruleIds} (at least one, not empty); FIX_TEXT {fixActionTemplate (required, at most 1000 characters)}; CONCLUSION_ROWS {rows (required, not empty)}.",
+      "description": "Only the keys of the kind: EXCLUSION_FILTER {fieldExpression (leave it out to exclude by the run's primary id; set it only for another field the person names), operator (default EXCLUDE_IN), filterValues (required, not empty)}; STATEMENT_NARROWING {diffTypes, conclusionCodes, ruleIds} (at least one, not empty); FIX_TEXT {fixActionTemplate (required, at most 1000 characters)}; CONCLUSION_ROWS {rows (required, not empty)}.",
       "properties": {
         "fieldExpression": {"type": "string"},
         "operator": {"type": "string"},

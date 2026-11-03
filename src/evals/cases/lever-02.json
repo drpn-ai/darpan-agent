@@ -3,6 +3,35 @@
   "about": "A cause comment that is a tenant lever: narrow what statement R2 covers to one conclusion (statement narrowing).",
   "userText": "R2 should only list memos where the store kept the item. memo left open findings like this one belong under R1, not R2",
   "openFindingId": "F-900812",
-  "fixtures": ["world.json", "findings.json"],
-  "expect": {"routerKinds": ["RULE_CHANGE", "CAUSE_FEEDBACK"], "outcome": "PROPOSAL", "proposalKind": "STATEMENT_NARROWING", "provenance": "PASS", "mustNotContainIds": []}
+  "fixtures": [
+    "world.json",
+    "findings.json"
+  ],
+  "expect": {
+    "routerKinds": [
+      "RULE_CHANGE",
+      "CAUSE_FEEDBACK"
+    ],
+    "outcome": "PROPOSAL",
+    "proposalKind": "STATEMENT_NARROWING",
+    "provenance": "PASS",
+    "mustNotContainIds": [],
+    "proposalMatch": {
+      "target": {
+        "auditId": {
+          "oneOf": [
+            "$AUDIT_ID",
+            "$AUDIT_CODE"
+          ]
+        },
+        "checkCode": "credits-open",
+        "statementCode": "R2"
+      },
+      "after": {
+        "conclusionCodes": {
+          "includes": "CONC_EVAL_STORE"
+        }
+      }
+    }
+  }
 }

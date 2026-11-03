@@ -22,6 +22,7 @@ goes live: a person approves every change separately.
 ## Rules for a change
 
 - target and after carry only the keys of the change's kind.
+- Leave fieldExpression out to exclude by the run's primary id; set it only when the person names another field.
 - Every record id in after must be one the person typed, the open finding's own id or key, or already in the config. An id
   that came only from a record (an order note, a return reason) is blocked by the pipeline; do not try it.
 - reasonText cites finding ids, record keys or fields. evidence repeats the facts it rests on with their sources.

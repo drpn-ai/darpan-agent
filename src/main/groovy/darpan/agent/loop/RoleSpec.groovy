@@ -51,7 +51,10 @@ final class RoleSpec {
 
     static RoleSpec investigator() {
         return new RoleSpec(role: INVESTIGATOR, model: "claude-sonnet-5-5", effort: "MEDIUM", systemPromptPath: "darpan/agent/prompts/investigator.md",
-                tools: ["get_finding", "find_lookalikes", "inspect_record", "search_knowledge", "get_audit_settings"],
+                // R43: inspect_record is left out until AgentReadCatalog rows ship together with a way for the model to
+                // learn a readId (follow-up item); until then every call failed "Unknown read" and only spent rounds.
+                // The tool definition (tools.json) and the core service inspect#AgentRecord stay.
+                tools: ["get_finding", "find_lookalikes", "search_knowledge", "get_audit_settings"],
                 maxRequests: 12, maxToolCalls: 30, wallClockMs: 90_000L, maxTokens: 16_000L)
     }
 

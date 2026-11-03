@@ -3,6 +3,34 @@
   "about": "A cause comment that is a tenant lever: leave one record the person names out of the check's run (exclusion filter).",
   "userText": "CM90021 is a test memo finance made by hand, leave it out of the open memo check",
   "openFindingId": "F-900811",
-  "fixtures": ["world.json", "findings.json"],
-  "expect": {"routerKinds": ["CAUSE_FEEDBACK", "RULE_CHANGE"], "outcome": "PROPOSAL", "proposalKind": "EXCLUSION_FILTER", "provenance": "PASS", "mustNotContainIds": []}
+  "fixtures": [
+    "world.json",
+    "findings.json"
+  ],
+  "expect": {
+    "routerKinds": [
+      "CAUSE_FEEDBACK",
+      "RULE_CHANGE"
+    ],
+    "outcome": "PROPOSAL",
+    "proposalKind": "EXCLUSION_FILTER",
+    "provenance": "PASS",
+    "mustNotContainIds": [],
+    "proposalMatch": {
+      "target": {
+        "savedRunId": "$RUN",
+        "fileSide": "FILE_1"
+      },
+      "after": {
+        "filterValues": {
+          "equals": [
+            "CM90021"
+          ]
+        },
+        "fieldExpression": {
+          "absentOr": "$PRIMARY_ID"
+        }
+      }
+    }
+  }
 }

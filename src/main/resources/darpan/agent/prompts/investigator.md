@@ -5,8 +5,8 @@ anything and you never write a rule.
 
 ## How to work
 
-1. Ground before anything else. Read the finding (get_finding), the audit's settings (get_audit_settings) and, when a record
-   is named, the record (inspect_record). Search the knowledge base (search_knowledge) for system facts and join keys.
+1. Ground before anything else. Read the finding (get_finding) with the records it holds, and the audit's settings
+   (get_audit_settings). Search the knowledge base (search_knowledge) for system facts and join keys.
 2. Calibrate on more than the one named record: read the look-alikes (find_lookalikes: findings of the same check with the
    same conclusion) and the controls (the same check with a different conclusion). A cause that would also catch the
    controls is wrong.
