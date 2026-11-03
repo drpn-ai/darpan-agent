@@ -23,14 +23,14 @@ import static org.junit.jupiter.api.Assertions.*
 import static org.junit.jupiter.api.Assumptions.assumeTrue
 
 /**
- * DAR-BE-159 Task 9. facade.AgentFacadeServices.send#AgentTurn as a real user on a thread of its own, authz ON (no
+ * DAR-BE-159 Task 9. facade.AgentTurnFacadeServices.send#AgentTurn as a real user on a thread of its own, authz ON (no
  * disableAuthz on that thread's path): the session, the switch, and the tenant pinned through a switch in another tab (R34).
  * The model is a scripted gateway set for that thread only. Tenants are synthetic.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AgentFacadeSmokeTests {
 
-    private static final String SERVICE = "facade.AgentFacadeServices.send#AgentTurn"
+    private static final String SERVICE = "facade.AgentTurnFacadeServices.send#AgentTurn"
     private static final String MINE = "AGF_TENANT_A"
     private static final String OTHER = "AGF_TENANT_B"
     private static final String USERNAME = "test.customer"

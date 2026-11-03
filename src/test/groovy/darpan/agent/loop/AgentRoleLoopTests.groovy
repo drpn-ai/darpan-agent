@@ -52,7 +52,14 @@ class AgentRoleLoopTests {
     static class ScriptedGateway implements ModelGateway {
         final List<Object> script
         final List<MessageCreateParams> sent = []
+        /** The per-attempt timeout each request was given. */
+        final List<java.time.Duration> timeouts = []
         ScriptedGateway(List<Object> script) { this.script = new ArrayList<Object>(script) }
+        @Override
+        Message send(MessageCreateParams params, java.time.Duration timeout) {
+            timeouts << timeout
+            return send(params)
+        }
         @Override
         Message send(MessageCreateParams params) {
             sent << params
@@ -527,6 +534,41 @@ class AgentRoleLoopTests {
         run(investigator(), gateway, loop)
         assertEquals([true], loop.executor.markerSeen)
         assertFalse(AgentCallMarker.inAgentLoop())
+    }
+
+    @Test
+    void "every request's attempts fit in what is left of the role, which the orchestrator caps at the turn's 240 s"() {
+        assertEquals(3, AgentRoleLoop.ATTEMPTS, "the client retries twice")
+        assertEquals(79_333L, AgentRoleLoop.attemptTimeout(240_000L).toMillis(), "(240 s - 2 s reserve) / 3")
+        assertEquals(5_000L, AgentRoleLoop.attemptTimeout(AgentRoleLoop.MIN_REQUEST_START_MS).toMillis())
+        (AgentRoleLoop.MIN_REQUEST_START_MS..240_000L).step(997) { long left ->
+            long t = AgentRoleLoop.attemptTimeout(left).toMillis()
+            assertTrue(t >= AgentRoleLoop.MIN_REQUEST_TIMEOUT_MS && t * AgentRoleLoop.ATTEMPTS + AgentRoleLoop.RETRY_BACKOFF_RESERVE_MS <= left,
+                    "${left} ms left: ${t} ms per attempt")
+        }
+
+        long cap = 240_000L
+        def gateway = new ScriptedGateway([
+                msg("tool_use", [toolUse("tu_1", "search_knowledge", [words: "a"])]),
+                msg("end_turn", [text("Done.")])])
+        long started = System.currentTimeMillis()
+        RoleResult r = run(investigator().copy(wallClockMs: cap), gateway)
+        assertEquals("DONE", r.outcome)
+        assertEquals(2, gateway.timeouts.size())
+        long elapsed = System.currentTimeMillis() - started
+        gateway.timeouts.each { java.time.Duration t ->
+            assertTrue(t.toMillis() * AgentRoleLoop.ATTEMPTS + AgentRoleLoop.RETRY_BACKOFF_RESERVE_MS <= cap, "${t} x ${AgentRoleLoop.ATTEMPTS} fits ${cap} ms")
+            assertTrue(t.toMillis() >= (cap - elapsed - AgentRoleLoop.RETRY_BACKOFF_RESERVE_MS).intdiv(AgentRoleLoop.ATTEMPTS) - 1, "${t} is what is left, divided")
+        }
+        assertTrue(gateway.timeouts[1] <= gateway.timeouts[0], "the second request gets what is left after the first")
+    }
+
+    @Test
+    void "a request whose attempts could not fit in what is left is not sent"() {
+        def gateway = new ScriptedGateway([msg("end_turn", [text("Never sent.")])])
+        RoleResult r = run(investigator().copy(wallClockMs: AgentRoleLoop.MIN_REQUEST_START_MS - 1), gateway)
+        assertEquals("BUDGET", r.outcome)
+        assertEquals(0, gateway.sent.size(), "less than 3 x 5 s plus the backoff reserve is left")
     }
 
     @Test

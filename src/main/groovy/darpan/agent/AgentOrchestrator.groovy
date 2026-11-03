@@ -50,7 +50,8 @@ class AgentOrchestrator {
     private static final Logger logger = LoggerFactory.getLogger(AgentOrchestrator.class)
 
     static final long OVERALL_CAP_MS = 240_000L
-    static final long MIN_ROLE_MS = 5_000L
+    /** A role that could not send even one request in time (AgentRoleLoop.MIN_REQUEST_START_MS) does not start. */
+    static final long MIN_ROLE_MS = AgentRoleLoop.MIN_REQUEST_START_MS
     static final BigDecimal MIN_CONFIDENCE = 0.6G
     static final int MAX_EVIDENCE_ROUNDS = 2
     static final int MAX_TEXT_CHARS = 20_000
@@ -150,14 +151,28 @@ class AgentOrchestrator {
         Map scrubbed = PasteScrubber.scrub(text)
         Turn turn = new Turn(ec: ec, pinned: pinned, auditId: auditId, auditCode: audit.auditCode as String, findingId: findingId,
                 words: scrubbed.text as String, masked: (List<String>) scrubbed.masked, deadline: clock.call() + overallCapMs)
-        turn.conversationId = conversation == null ? createConversation(ec, pinned, userId, auditId, findingId) : conversationId
-        if (conversation != null && findingId && conversation.findingId != findingId) setOpenFinding(ec, pinned, conversationId, findingId)
-        turn.transcript = new Transcript(ec, pinned, turn.conversationId)
+        boolean fresh = conversation == null
+        turn.conversationId = fresh ? TenantScopedFinder.mintId(ec, "darpan.agent.AgentConversation", "conversationId") : conversationId
+        turn.transcript = transcriptFor(ec, pinned, turn.conversationId)
         turn.earlier = turn.transcript.earlierUserTexts(EARLIER_TURNS)
         turn.lastQuestion = turn.transcript.lastQuestion()
-        // The person's words are stored before any role runs: create#AuditChangeProposal reads them as the human's text.
-        turn.transcript.write("USER", null, [[type: "text", text: turn.words]])
 
+        try {
+            // The person's words are stored before any role runs: create#AuditChangeProposal reads them as the human's text.
+            // A new conversation, its open finding and the words land in one transaction, so a failed write leaves no
+            // empty conversation behind and the turn ends ERROR before any model call.
+            ec.transaction.runRequireNew(null, "Could not store the message to the agent") {
+                if (fresh) createConversation(ec, turn.conversationId, pinned, userId, auditId, findingId)
+                else if (findingId && conversation.findingId != findingId) setOpenFinding(ec, pinned, conversationId, findingId)
+                turn.transcript.write("USER", null, [[type: "text", text: turn.words]])
+            }
+        } catch (Exception e) {
+            logger.error("Agent message in conversation ${turn.conversationId} could not be stored".toString(), e)
+            ec.message.clearErrors()
+            return response(fresh ? null : conversationId, "ERROR", "Your message could not be stored; nothing was changed. Try again.")
+        }
+
+        turn.priorIds = turn.transcript.madeIds()
         try {
             runTurn(turn)
         } catch (Stop stop) {
@@ -167,13 +182,57 @@ class AgentOrchestrator {
             logger.error("Agent turn in conversation ${turn.conversationId} failed".toString(), e)
             ec.message.clearErrors()
             turn.outcome = "ERROR"
-            turn.replyParts << "Something went wrong on our side; nothing was changed."
+            adoptCommitted(turn)
+            turn.replyParts << failedReply(turn)
         }
         Map out = finish(turn)
-        turn.transcript.write("ASSISTANT", null, [role: "REPLY", text: out.reply, question: out.question])
-        turn.transcript.write("OPERATOR", null, [outcome: out.outcome, proposalIds: ((List<Map>) out.proposals)*.proposalId,
-                ticketIds: ((List<Map>) out.tickets)*.ticketId, masked: turn.masked])
+        try {
+            turn.transcript.write("ASSISTANT", null, [role: "REPLY", text: out.reply, question: out.question])
+            turn.transcript.write("OPERATOR", null, [outcome: out.outcome, proposalIds: ((List<Map>) out.proposals)*.proposalId,
+                    ticketIds: ((List<Map>) out.tickets)*.ticketId, masked: turn.masked])
+        } catch (Exception e) {
+            // What the turn made is already committed: the person still gets the reply and its proposal and ticket ids.
+            logger.error("Agent reply in conversation ${turn.conversationId} could not be stored".toString(), e)
+            ec.message.clearErrors()
+        }
         return out
+    }
+
+    /** The conversation's transcript; tests override it to make a write fail. */
+    protected Transcript transcriptFor(def ec, String pinned, String conversationId) {
+        return new Transcript(ec, pinned, conversationId)
+    }
+
+    /**
+     * A turn that failed may have made proposals or tickets the turn never took in (a role threw after its tool ran): the
+     * conversation's rows this turn added are taken in, so the reply and the response list them.
+     */
+    private static void adoptCommitted(Turn turn) {
+        try {
+            Map<String, List<String>> now = turn.transcript.madeIds()
+            now.proposals.findAll { !(it in turn.priorIds.proposals) && !turn.proposals.containsKey(it) }.each { String id ->
+                Map view = proposalView(turn.ec, turn.pinned, id)
+                if (view) turn.proposals[id] = view
+            }
+            now.tickets.findAll { !(it in turn.priorIds.tickets) && !turn.tickets.containsKey(it) }.each { String id ->
+                turn.tickets[id] = [ticketId: id, category: null, duplicate: false]
+            }
+        } catch (Exception e) {
+            logger.error("Agent turn in conversation ${turn.conversationId}: could not read what it made".toString(), e)
+            turn.ec.message.clearErrors()
+        }
+    }
+
+    /**
+     * The reply of a turn that failed: what it had already drafted is committed (a tool runs in its own transaction), so
+     * the reply lists it instead of claiming nothing was changed. Drafts apply only once a person approves them.
+     */
+    static String failedReply(Turn turn) {
+        if (!turn.proposals && !turn.tickets) return "Something went wrong on our side; nothing was changed."
+        List<String> made = []
+        if (turn.proposals) made << "proposals ${turn.proposals.keySet().join(', ')}".toString()
+        if (turn.tickets) made << "tickets ${turn.tickets.keySet().join(', ')}".toString()
+        return "Something went wrong on our side after drafting ${made.join(' and ')}. A proposal changes nothing until a person approves it; nothing else was changed.".toString()
     }
 
     private void runTurn(Turn turn) {
@@ -410,11 +469,9 @@ class AgentOrchestrator {
     }
 
     private void record(Turn turn, RoleSpec spec, RoleResult r, String turnId) {
-        turn.transcript.write("ASSISTANT", turnId, [role: spec.role, model: spec.model, outcome: r.outcome, text: r.text(),
-                control: r.control == null ? null : [tool: r.control.tool, input: r.control.input]])
+        // What the tools made is already committed (each runs in its own transaction), so it is taken into the turn before
+        // any transcript write: a failed write then ends the turn ERROR with these ids, never "nothing was changed".
         r.toolCalls.each { Map call ->
-            turn.transcript.write("TOOL_RESULT", turnId, [tool: call.name, toolUseId: call.toolUseId, input: call.input,
-                    isError: call.isError, content: call.content])
             if (call.isError) return
             if (call.name == "propose_change") {
                 String id = outValue(call.content as String, "proposalId")
@@ -424,6 +481,12 @@ class AgentOrchestrator {
                 String id = outValue(call.content as String, "ticketId")
                 if (id) turn.tickets[id] = [ticketId: id, category: ((Map) call.input).category, duplicate: (call.content as String).contains('"duplicate":true')]
             }
+        }
+        turn.transcript.write("ASSISTANT", turnId, [role: spec.role, model: spec.model, outcome: r.outcome, text: r.text(),
+                control: r.control == null ? null : [tool: r.control.tool, input: r.control.input]])
+        r.toolCalls.each { Map call ->
+            turn.transcript.write("TOOL_RESULT", turnId, [tool: call.name, toolUseId: call.toolUseId, input: call.input,
+                    isError: call.isError, content: call.content])
         }
     }
 
@@ -523,24 +586,18 @@ class AgentOrchestrator {
         return statement != null && statement.auditId == auditId
     }
 
-    private static String createConversation(def ec, String pinned, String userId, String auditId, String findingId) {
-        String id = null
-        ec.transaction.runRequireNew(null, "Could not start the agent conversation") {
-            id = TenantScopedFinder.mintId(ec, "darpan.agent.AgentConversation", "conversationId")
-            ec.entity.makeValue("darpan.agent.AgentConversation").setAll([conversationId: id, companyUserGroupId: pinned, userId: userId,
-                    auditId: auditId, findingId: findingId, createdDate: ec.user.nowTimestamp]).create()
-        }
-        return id
+    /** In the caller's transaction (with the first message). */
+    private static void createConversation(def ec, String id, String pinned, String userId, String auditId, String findingId) {
+        ec.entity.makeValue("darpan.agent.AgentConversation").setAll([conversationId: id, companyUserGroupId: pinned, userId: userId,
+                auditId: auditId, findingId: findingId, createdDate: ec.user.nowTimestamp]).create()
     }
 
-    /** The conversation now opens on another finding, so provenance reads that finding as the open context. */
+    /** The conversation now opens on another finding, so provenance reads that finding as the open context. In the caller's transaction. */
     private static void setOpenFinding(def ec, String pinned, String conversationId, String findingId) {
-        ec.transaction.runRequireNew(null, "Could not update the agent conversation") {
-            def row = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.agent.AgentConversation", "conversationId", conversationId, pinned, WHY)
-            if (row == null) throw new IllegalStateException("Conversation ${conversationId} is not the pinned tenant's".toString())
-            row.findingId = findingId
-            row.update()
-        }
+        def row = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.agent.AgentConversation", "conversationId", conversationId, pinned, WHY)
+        if (row == null) throw new IllegalStateException("Conversation ${conversationId} is not the pinned tenant's".toString())
+        row.findingId = findingId
+        row.update()
     }
 
     /** The conversation's messages: every write carries the pinned tenant and the next sequence number, in its own transaction. */
@@ -561,25 +618,28 @@ class AgentOrchestrator {
         }
 
         private def rows() {
-            return TenantScopedFinder.findGlobalUnscoped(ec, "darpan.agent.AgentMessage", WHY)
+            return TenantScopedFinder.findGlobalUnscoped(ec, "darpan.agent.AgentMessage", AgentOrchestrator.WHY)
                     .condition("companyUserGroupId", pinned).condition("conversationId", conversationId).useCache(false)
         }
 
+        /** In its own transaction, except the USER message, which joins the transaction that may create the conversation. */
         void write(String kind, String turnId, Object content) {
             String json = JsonOutput.toJson(content)
             long seq = nextSeq++
-            ec.transaction.runRequireNew(null, "Could not write the agent transcript") {
+            Closure insert = {
                 ec.entity.makeValue("darpan.agent.AgentMessage").setAll([messageId: TenantScopedFinder.mintId(ec, "darpan.agent.AgentMessage", "messageId"),
                         conversationId: conversationId, companyUserGroupId: pinned, turnId: turnId, sequenceNum: seq, kind: kind,
                         contentJson: json]).create()
             }
+            if (kind == "USER") insert.call()
+            else ec.transaction.runRequireNew(null, "Could not write the agent transcript", insert)
         }
 
         /** The text of the person's last n messages before this one, oldest first. */
         List<String> earlierUserTexts(int n) {
             List<String> out = []
             rows().condition("kind", "USER").orderBy(NEWEST_FIRST).limit(n).list().each { msg ->
-                Object parsed = parseJson(msg.contentJson as String)
+                Object parsed = AgentOrchestrator.parseJson(msg.contentJson as String)
                 List<String> texts = []
                 (parsed instanceof List ? (List) parsed : [parsed]).each { Object b ->
                     if (b instanceof Map && ((Map) b).type == "text" && ((Map) b).text instanceof String) texts << (String) ((Map) b).text
@@ -593,21 +653,32 @@ class AgentOrchestrator {
         Map lastQuestion() {
             def last = rows().condition("kind", "ASSISTANT").orderBy(NEWEST_FIRST).limit(1).list()
             if (!last) return null
-            Object parsed = parseJson(last[0].contentJson as String)
+            Object parsed = AgentOrchestrator.parseJson(last[0].contentJson as String)
             if (!(parsed instanceof Map) || ((Map) parsed).role != "REPLY" || !(((Map) parsed).question instanceof Map)) return null
             Map q = (Map) ((Map) parsed).question
             return q.text ? [text: q.text as String, from: q.from as String] : null
         }
 
+        /** The ids of the conversation's proposals and tickets, [proposals, tickets]. */
+        Map<String, List<String>> madeIds() {
+            List<String> proposals = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.agent.AuditChangeProposal", AgentOrchestrator.WHY)
+                    .condition("companyUserGroupId", pinned).condition("conversationId", conversationId).orderBy("proposalId")
+                    .useCache(false).list()*.proposalId.collect { it as String }
+            List<String> tickets = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.agent.BrainChangeTicket", AgentOrchestrator.WHY)
+                    .condition("companyUserGroupId", pinned).condition("conversationId", conversationId).orderBy("ticketId")
+                    .useCache(false).list()*.ticketId.collect { it as String }
+            return [proposals: proposals, tickets: tickets]
+        }
+
         /** The conversation's proposals so far: what the author drafted, for a CORRECTION. */
         List<Map> conversationProposals() {
-            return TenantScopedFinder.findGlobalUnscoped(ec, "darpan.agent.AuditChangeProposal", WHY)
+            return TenantScopedFinder.findGlobalUnscoped(ec, "darpan.agent.AuditChangeProposal", AgentOrchestrator.WHY)
                     .condition("companyUserGroupId", pinned).condition("conversationId", conversationId).orderBy("proposalId")
                     .useCache(false).list().collect { row ->
                 // A blocked draft's values came from records, not the person: the author is told it is blocked, not what it held.
                 Map p = [proposalId: row.proposalId, kind: row.kind, status: row.status, provenanceStatus: row.provenanceStatus,
-                         target: parseJson(row.targetJson as String)]
-                if (row.provenanceStatus != "BLOCKED") p.after = parseJson(row.afterJson as String)
+                         target: AgentOrchestrator.parseJson(row.targetJson as String)]
+                if (row.provenanceStatus != "BLOCKED") p.after = AgentOrchestrator.parseJson(row.afterJson as String)
                 return p
             }
         }
@@ -664,6 +735,8 @@ class AgentOrchestrator {
         Transcript transcript
         Map<String, Map> proposals = new LinkedHashMap<>()
         Map<String, Map> tickets = new LinkedHashMap<>()
+        /** The conversation's proposal and ticket ids before this turn's roles ran. */
+        Map<String, List<String>> priorIds = [proposals: [], tickets: []]
         List<String> replyParts = []
         Map question
         String outcome

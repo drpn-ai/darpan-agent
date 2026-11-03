@@ -369,6 +369,14 @@ class AgentOrchestratorTests {
         String noKey = darpan.agent.loop.AgentToolExecutor.authorView("propose_change", false, JsonOutput.toJson([proposalId: "100002", status: "INVALID",
                 statusMessage: darpan.agent.pipeline.AuditChangeLevers.NO_PRIMARY_ID_MESSAGE, provenanceStatus: "PASS", blockedIds: []]))
         assertEquals("NO_PRIMARY_ID", ((Map) new JsonSlurper().parseText(noKey)).statusCode, "R44: no single primary id to exclude by")
+        [(darpan.agent.pipeline.AuditChangeLevers.NO_CHANGE_MESSAGE): "NO_CHANGE",
+         (darpan.agent.pipeline.AuditChangeLevers.EXISTING_FILTER_OPERATOR_PREFIX + "this run side already filters x with INCLUDE_IN"): "EXISTING_FILTER_OPERATOR",
+         ("SYSTEM " + darpan.agent.pipeline.AuditChangeLevers.EXISTING_FILTER_OPERATOR_PREFIX): "INVALID"].each { String message, String code ->
+            String view = darpan.agent.loop.AgentToolExecutor.authorView("propose_change", false, JsonOutput.toJson([proposalId: "100003",
+                    status: "INVALID", statusMessage: message, provenanceStatus: "PASS", blockedIds: []]))
+            assertEquals(code, ((Map) new JsonSlurper().parseText(view)).statusCode, "R51: ${message}")
+            assertTrue(code in darpan.agent.loop.AgentToolExecutor.STATUS_CODES)
+        }
         assertEquals("TOOL_ERROR", darpan.agent.loop.AgentToolExecutor.authorView("propose_change", true, "ERROR: " + injection))
     }
 
@@ -590,6 +598,72 @@ class AgentOrchestratorTests {
         assertEquals([20_000L, 40_000L], o.clocks, "the investigator gets the 40 s left, not its own 90 s")
         assertEquals("INCOMPLETE", out.outcome, "2 s left is too little to start the author")
         assertEquals(2, g.sent.size())
+        // R54: each request's attempts (the SDK retries twice) and the backoff between them fit in its role's share of the 240 s.
+        [g.timeouts, o.clocks].transpose().each { List pair ->
+            long perAttempt = ((java.time.Duration) pair[0]).toMillis()
+            assertTrue(perAttempt * darpan.agent.loop.AgentRoleLoop.ATTEMPTS + darpan.agent.loop.AgentRoleLoop.RETRY_BACKOFF_RESERVE_MS <= (pair[1] as long),
+                    "${perAttempt} ms per attempt within ${pair[1]} ms")
+        }
+    }
+
+    /** A transcript whose writes of one kind fail, as a database refusing the row would. */
+    static class FailingTranscript extends AgentOrchestrator.Transcript {
+        final String failKind
+        FailingTranscript(def e, String pinned, String conversationId, String failKind) { super(e, pinned, conversationId); this.failKind = failKind }
+        @Override
+        void write(String kind, String turnId, Object content) {
+            if (kind == failKind) throw new IllegalStateException("simulated ${kind} write failure".toString())
+            super.write(kind, turnId, content)
+        }
+    }
+
+    static class FailingWriteOrchestrator extends AgentOrchestrator {
+        final String failKind
+        FailingWriteOrchestrator(AgentRoleLoopTests.ScriptedGateway g, String failKind) { super(g, AVAILABLE); this.failKind = failKind }
+        @Override
+        protected AgentOrchestrator.Transcript transcriptFor(def e, String pinned, String conversationId) {
+            return new FailingTranscript(e, pinned, conversationId, failKind)
+        }
+    }
+
+    @Test
+    void "a message that cannot be stored ends the turn ERROR with no conversation and no model call"() {
+        def g = new AgentRoleLoopTests.ScriptedGateway([])
+        Map out = send(new FailingWriteOrchestrator(g, "USER"), "Why is this one open?")
+        assertEquals("ERROR", out.outcome)
+        assertNull(out.conversationId, "no conversation was kept")
+        assertTrue((out.reply as String).contains("could not be stored"), out.reply as String)
+        assertEquals(0, g.sent.size())
+        AGENT_ENTITIES.each { assertEquals(0L, count(it), it) }
+    }
+
+    @Test
+    void "a transcript write that fails after propose_change lists the proposal instead of saying nothing changed"() {
+        String words = "CM-2002 is a test memo; leave it out of the open memo check."
+        def g = new AgentRoleLoopTests.ScriptedGateway([
+                router([item("CAUSE_FEEDBACK", words)]),
+                evidence([fact("savedRunId", runId, "CONFIG"), fact("recordKey", "CM-2002", "HUMAN")]),
+                authorSays([toolUse("tu_9", "propose_change", exclusionFor("CM-2002"))]),
+                authorEnds("Drafted.")])
+        Map out = send(new FailingWriteOrchestrator(g, "TOOL_RESULT"), words)
+        assertEquals("ERROR", out.outcome, out.toString())
+        List<String> ids = asSystem { ec.entity.find("darpan.agent.AuditChangeProposal").useCache(false).list()*.proposalId.collect { it as String } }
+        assertEquals(1, ids.size(), "propose_change committed its draft")
+        assertEquals(ids, ((List<Map>) out.proposals)*.proposalId, "the response carries the committed proposal")
+        assertFalse((out.reply as String).contains("nothing was changed"), out.reply as String)
+        assertTrue((out.reply as String).contains(ids[0]), out.reply as String)
+        List<String> kinds = messages(out.conversationId as String)*.kind
+        assertEquals("OPERATOR", kinds.last(), "the reply and outcome are still stored: ${kinds}")
+    }
+
+    @Test
+    void "a 10,000-character message is stored whole"() {
+        String words = ("Why is this memo still open after the refund cleared? " * 200).take(10_000)
+        def g = new AgentRoleLoopTests.ScriptedGateway([router([item("OTHER", "poem")])])
+        Map out = send(new AgentOrchestrator(g, AVAILABLE), words)
+        assertEquals("DECLINED", out.outcome)
+        Map user = messages(out.conversationId as String).find { it.kind == "USER" }
+        assertEquals(words, ((List<Map>) user.content)[0].text)
     }
 
     @Test

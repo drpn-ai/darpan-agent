@@ -40,7 +40,7 @@ class AnthropicModelGateway implements ModelGateway {
         return send(params, null)
     }
 
-    /** Each attempt (the client retries twice) is bounded by timeout when one is given. */
+    /** Each attempt (the client makes up to AgentClientFactory.MAX_RETRIES + 1) is bounded by timeout when one is given. */
     @Override
     Message send(MessageCreateParams params, Duration timeout) {
         AnthropicClient client

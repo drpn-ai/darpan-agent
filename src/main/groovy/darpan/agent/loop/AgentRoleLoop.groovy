@@ -40,8 +40,11 @@ import java.util.concurrent.ConcurrentHashMap
  * stop reason this code does not know, or a 4xx it caused (ERROR; the 4xx is rethrown after the turn is closed).
  * Every request is priced onto the turn's AgentTurn row, under the pinned tenant.
  *
- * wallClockMs is checked between steps: before each request and before each tool. A request already in flight is bounded
- * by its own timeout, set from what is left of the budget (the SDK's retries can each take up to that long).
+ * wallClockMs is checked between steps: before each request and before each tool. The orchestrator gives a role at most
+ * what is left of the turn's 240 s, so this is also the turn cap. A request already in flight is bounded by its attempts:
+ * the SDK makes up to {@link #ATTEMPTS} of it, each with its own timeout (RequestOptions.timeout is per attempt), so each
+ * attempt gets {@link #attemptTimeout} of what is left, all attempts and the SDK's backoff between them fit in it, and a
+ * request that could not fit (less than {@link #MIN_REQUEST_START_MS} left) is not sent (BUDGET).
  */
 class AgentRoleLoop {
     private static final Logger logger = LoggerFactory.getLogger(AgentRoleLoop.class)
@@ -50,8 +53,22 @@ class AgentRoleLoop {
     static final String FALLBACKS_PROPERTY = "darpan.agent.fallbacks"
     static final String FALLBACK_BETA = "server-side-fallback-2026-07-01"
     static final int SAME_CALL_LIMIT = 3
-    /** A request is never given less than this, even when the wall clock is nearly spent. */
+    /** An attempt is never given less than this. */
     static final long MIN_REQUEST_TIMEOUT_MS = 5_000L
+    /** Attempts the SDK makes of one request: the first and its retries. */
+    static final int ATTEMPTS = darpan.agent.claude.AgentClientFactory.MAX_RETRIES + 1
+    /**
+     * Kept back for the SDK's sleeps between attempts: 0.5 s then 1 s at most (0.5 s x 2^n, jittered down) when the API
+     * sends no Retry-After. A Retry-After the API sends is honoured by the SDK on top of this.
+     */
+    static final long RETRY_BACKOFF_RESERVE_MS = 2_000L
+    /** Less than this left and a request is not sent: its attempts could not each get MIN_REQUEST_TIMEOUT_MS within it. */
+    static final long MIN_REQUEST_START_MS = MIN_REQUEST_TIMEOUT_MS * ATTEMPTS + RETRY_BACKOFF_RESERVE_MS
+
+    /** One attempt's timeout when remainingMs is left: max(5 s, (remaining - backoff reserve) / attempts). */
+    static Duration attemptTimeout(long remainingMs) {
+        return Duration.ofMillis(Math.max(MIN_REQUEST_TIMEOUT_MS, (long) ((remainingMs - RETRY_BACKOFF_RESERVE_MS).intdiv(ATTEMPTS))))
+    }
 
     private static final Map<String, String> PROMPTS = new ConcurrentHashMap<>()
 
@@ -75,13 +92,14 @@ class AgentRoleLoop {
         int toolCallsRun = 0
 
         while (true) {
-            if (result.requestCount >= spec.maxRequests || System.currentTimeMillis() > deadline) return finish(ec, pinnedTenantId, turnId, result, "BUDGET")
+            long left = deadline - System.currentTimeMillis()
+            // The cap is enforced before each request: one that could not finish all its attempts in time is not sent.
+            if (result.requestCount >= spec.maxRequests || left < MIN_REQUEST_START_MS) return finish(ec, pinnedTenantId, turnId, result, "BUDGET")
             if (!tenantStill(ec, pinnedTenantId)) return finish(ec, pinnedTenantId, turnId, result, "TENANT_CHANGED")
 
             Message response
             try {
-                long left = Math.max(MIN_REQUEST_TIMEOUT_MS, deadline - System.currentTimeMillis())
-                response = gateway.send(buildParams(spec, result.messages), Duration.ofMillis(left))
+                response = gateway.send(buildParams(spec, result.messages), attemptTimeout(left))
             } catch (RateLimitException | UnauthorizedException | PermissionDeniedException | SseException e) {
                 return unavailable(ec, pinnedTenantId, turnId, result, e)
             } catch (AnthropicServiceException e) {

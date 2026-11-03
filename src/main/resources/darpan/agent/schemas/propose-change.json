@@ -20,10 +20,10 @@
     "after": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Only the keys of the kind: EXCLUSION_FILTER {fieldExpression (leave it out to exclude by the run's primary id; set it only for another field the person names), operator (default EXCLUDE_IN), filterValues (required, not empty)}; STATEMENT_NARROWING {diffTypes, conclusionCodes, ruleIds} (at least one, not empty); FIX_TEXT {fixActionTemplate (required, at most 1000 characters)}; CONCLUSION_ROWS {rows (required, not empty)}.",
+      "description": "Only the keys of the kind: EXCLUSION_FILTER {fieldExpression (leave it out to exclude by the run's primary id; set it only for another field the person names), operator (EXCLUDE_IN, or leave it out), filterValues (required, not empty; filterValues are added to the field's existing exclusions; you cannot remove an exclusion or change a scope)}; STATEMENT_NARROWING {diffTypes, conclusionCodes, ruleIds} (at least one, not empty); FIX_TEXT {fixActionTemplate (required, at most 1000 characters)}; CONCLUSION_ROWS {rows (required, not empty)}.",
       "properties": {
         "fieldExpression": {"type": "string"},
-        "operator": {"type": "string"},
+        "operator": {"type": "string", "enum": ["EXCLUDE_IN"]},
         "filterValues": {"type": "array", "items": {"type": "string"}},
         "diffTypes": {"type": "array", "items": {"type": "string"}},
         "conclusionCodes": {"type": "array", "items": {"type": "string"}},

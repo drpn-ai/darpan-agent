@@ -125,7 +125,8 @@ class AgentToolExecutor {
     }
 
     /** The closed set the author reads in place of a proposal's free-text statusMessage. */
-    static final List<String> STATUS_CODES = ["EDITOR_MESSAGE", "STALE", "UNSAFE_TREE", "NO_PRIMARY_ID", "INVALID"].asImmutable()
+    static final List<String> STATUS_CODES = ["EDITOR_MESSAGE", "STALE", "UNSAFE_TREE", "NO_PRIMARY_ID", "NO_CHANGE", "EXISTING_FILTER_OPERATOR",
+            "INVALID"].asImmutable()
 
     /**
      * A proposal's status as a code: from its status, plus, for an INVALID one, whether the pipeline marked it with its own
@@ -140,7 +141,11 @@ class AgentToolExecutor {
             case "INVALID":
                 if (out.statusMessage == darpan.agent.pipeline.AuditChangeLevers.UNSAFE_TREE_MESSAGE) return "UNSAFE_TREE"
                 // R44: the exclusion named no field and the run side has no single primary id to default to.
-                return out.statusMessage == darpan.agent.pipeline.AuditChangeLevers.NO_PRIMARY_ID_MESSAGE ? "NO_PRIMARY_ID" : "INVALID"
+                if (out.statusMessage == darpan.agent.pipeline.AuditChangeLevers.NO_PRIMARY_ID_MESSAGE) return "NO_PRIMARY_ID"
+                // R51: every value already excluded, or the field holds an include scope an exclusion may not change.
+                if (out.statusMessage == darpan.agent.pipeline.AuditChangeLevers.NO_CHANGE_MESSAGE) return "NO_CHANGE"
+                String message = out.statusMessage instanceof String ? (String) out.statusMessage : ""
+                return message.startsWith(darpan.agent.pipeline.AuditChangeLevers.EXISTING_FILTER_OPERATOR_PREFIX) ? "EXISTING_FILTER_OPERATOR" : "INVALID"
             default: return "INVALID"
         }
     }
