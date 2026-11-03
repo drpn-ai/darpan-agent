@@ -16,7 +16,12 @@ class PasteScrubber {
             ["API_KEY", Pattern.compile(/sk-ant-\S+/), "[masked API key]"],
             ["AWS_KEY", Pattern.compile(/AKIA[0-9A-Z]{16}/), "[masked access key]"],
             ["BEARER", Pattern.compile(/(?i)\bBearer\s+(?!\[masked)\S+/), "Bearer [masked token]"],
-            ["SECRET", Pattern.compile(/(?i)\b(password|token|secret|api[_-]?key)(\s*[:=]\s*)(?!\[masked)\S+/), '$1$2[masked secret]'],
+            // An HTTP Basic credential; "Basic" capitalised as in the header, so a plain "basic check" is left alone.
+            ["BASIC", Pattern.compile(/\bBasic\s+(?!\[masked)\S+/), "Basic [masked credentials]"],
+            // Not \b: the key may end a longer name (access_token, client_secret, token_secret); quotes around key and value
+            // cover JSON and config pastes ("password": "x", 'apiKey':'x').
+            ["SECRET", Pattern.compile(/(?i)(?<![A-Za-z])(password|passwd|token|secret|api[_-]?key)(["']?\s*[:=]\s*["']?)(?!\[masked)[^\s"',}]+/),
+             '$1$2[masked secret]'],
             // The customer-data shapes the knowledge leak check uses (darpan/knowledge/private-shapes.json).
             ["EMAIL", Pattern.compile(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/), "[masked email]"],
             ["PHONE", Pattern.compile(/(?<![\w.])(?:\+\d[\d\s().-]{7,}\d|(?:\(\d{3}\)[\s.-]?|\d{3}[\s.-])\d{3}[\s.-]\d{4})(?!\w)/), "[masked phone]"],

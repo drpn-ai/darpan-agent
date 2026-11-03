@@ -35,7 +35,7 @@ import static org.junit.jupiter.api.Assertions.*
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AgentRoleLoopTests {
 
-    private static final String MINE = "KREWE"
+    private static final String MINE = "ARL_TENANT_A"
     private static final String OTHER = "ARL_OTHER"
     private static final String USERNAME = "test.customer"
     private static final String USER = "TEST_CUSTOMER_USER"
@@ -113,11 +113,13 @@ class AgentRoleLoopTests {
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "agent-role-loop")
         ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        upsert("moqui.security.UserGroup", [userGroupId: OTHER, description: "Other tenant",
-                groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
-        upsert("moqui.security.UserGroupMember", [userGroupId: OTHER, userId: USER, fromDate: FROM])
-        upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: OTHER, userId: USER,
-                permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID, fromDate: FROM])
+        [MINE, OTHER].each { String t ->
+            upsert("moqui.security.UserGroup", [userGroupId: t, description: "${t} Co".toString(),
+                    groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
+            upsert("moqui.security.UserGroupMember", [userGroupId: t, userId: USER, fromDate: FROM])
+            upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: t, userId: USER,
+                    permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID, fromDate: FROM])
+        }
         upsert("darpan.agent.AgentConversation", [conversationId: CONV, companyUserGroupId: MINE, userId: USER, createdDate: FROM])
     }
 

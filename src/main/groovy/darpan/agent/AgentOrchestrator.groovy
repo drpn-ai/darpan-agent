@@ -133,8 +133,8 @@ class AgentOrchestrator {
         if (text.length() > MAX_TEXT_CHARS) { ec.message.addError("The message is longer than ${MAX_TEXT_CHARS} characters; send it in parts.".toString()); return null }
         def audit = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.Audit", "auditId", auditId, pinned, WHY)
         if (audit == null) { ec.message.addError("Audit ${auditId} was not found.".toString()); return null }
-        if (findingId && TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditFinding", "findingId", findingId, pinned, WHY) == null) {
-            ec.message.addError("Finding ${findingId} was not found.".toString()); return null
+        if (findingId && !findingOfAudit(ec, pinned, auditId, findingId)) {
+            ec.message.addError("Finding ${findingId} was not found in audit ${auditId}.".toString()); return null
         }
         def conversation = null
         if (conversationId) {
@@ -154,7 +154,7 @@ class AgentOrchestrator {
         if (conversation != null && findingId && conversation.findingId != findingId) setOpenFinding(ec, pinned, conversationId, findingId)
         turn.transcript = new Transcript(ec, pinned, turn.conversationId)
         turn.earlier = turn.transcript.earlierUserTexts(EARLIER_TURNS)
-        turn.lastQuestion = turn.transcript.lastSafeQuestion()
+        turn.lastQuestion = turn.transcript.lastQuestion()
         // The person's words are stored before any role runs: create#AuditChangeProposal reads them as the human's text.
         turn.transcript.write("USER", null, [[type: "text", text: turn.words]])
 
@@ -224,7 +224,7 @@ class AgentOrchestrator {
             b << "The person's earlier messages, oldest first:\n"
             turn.earlier.each { b << "- " << oneLine(it, 500) << "\n" }
         }
-        if (turn.lastQuestion) b << "Your last question to them: " << oneLine(turn.lastQuestion, 500) << "\n"
+        if (turn.lastQuestion) b << "Your last question to them: " << questionFor(turn.lastQuestion, [RoleSpec.ROUTER]) << "\n"
         b << "\nThe person's message:\n<<<MESSAGE\n" << turn.words << "\nMESSAGE>>>\n"
         return b.toString()
     }
@@ -356,7 +356,7 @@ class AgentOrchestrator {
             b << "The person's earlier messages, oldest first:\n"
             turn.earlier.each { b << "- " << oneLine(it, 500) << "\n" }
         }
-        if (turn.lastQuestion) b << "The last question asked of them: " << oneLine(turn.lastQuestion, 500) << "\n"
+        if (turn.lastQuestion) b << "The last question asked of them: " << questionFor(turn.lastQuestion, [RoleSpec.ROUTER, RoleSpec.AUTHOR]) << "\n"
         b << "\nThe person's words, verbatim:\n<<<MESSAGE\n" << turn.words << "\nMESSAGE>>>\n"
         b << "\nItems of this turn (index from 0): " << JsonOutput.toJson(itemsView(items)) << "\n"
         if (evidence != null) {
@@ -364,7 +364,7 @@ class AgentOrchestrator {
             List<Map> open = turn.transcript.conversationProposals()
             if (open) b << "Proposals already in this conversation: " << JsonOutput.toJson(open) << "\n"
         } else {
-            b << "Raise a ticket for each item with the person's words verbatim.\n"
+            b << "Only raise_ticket is available in this step: raise a ticket for each item with the person's words verbatim.\n"
         }
         return b.toString()
     }
@@ -391,6 +391,10 @@ class AgentOrchestrator {
         long left = turn.deadline - clock.call()
         if (left < MIN_ROLE_MS) throw new Stop("INCOMPLETE", "I ran out of time for this message; ask again for the rest.")
         if (overDailyCap(turn.ec, turn.pinned)) throw new Stop("OVER_BUDGET", "The agent's budget for this tenant is spent for today (UTC).")
+        // The switch is read again before every role: turned off mid-turn, the next role does not start.
+        String state = availability.call(turn.ec)
+        if (state != AgentSwitch.ON) throw new Stop(state ?: AgentSwitch.AGENT_OFF, state == AgentSwitch.AGENT_UNAVAILABLE ?
+                "The agent cannot reach Claude right now; try again later." : "The agent was switched off for this tenant.")
         RoleSpec spec = left < base.wallClockMs ? base.copy(wallClockMs: left) : base
         String turnId
         try {
@@ -446,10 +450,7 @@ class AgentOrchestrator {
     private Map finish(Turn turn) {
         List<Map> proposals = new ArrayList<Map>(turn.proposals.values())
         List<String> blocked = proposals.findAll { it.provenanceStatus == "BLOCKED" }.collectMany { (List<String>) it.blockedIds }.unique()
-        if (blocked && turn.question == null) {
-            turn.question = [text: ("I saw ${blocked.take(10).join(', ')} only in record data, not in your words, the open finding or the " +
-                    "config, so that change is blocked. If it belongs in the change, type it yourself.").toString(), options: [], from: "PROVENANCE"]
-        }
+        if (blocked && turn.question == null) turn.question = [text: provenanceQuestion(blocked), options: [], from: "PROVENANCE"]
         String outcome = turn.outcome ?: (turn.question != null ? "QUESTION" : "DONE")
         if (outcome == "DONE" && turn.question != null) outcome = "QUESTION"
         Map out = response(turn.conversationId, outcome, turn.replyParts.findAll { it }.join("\n\n") ?: null)
@@ -458,6 +459,16 @@ class AgentOrchestrator {
         out.question = turn.question
         out.masked = turn.masked
         return out
+    }
+
+    static final int MAX_ECHOED_IDS = 5
+    static final int MAX_ECHOED_ID_CHARS = 64
+
+    /** The question a blocked proposal turns into: at most 5 of its ids, each cut at 64 characters. */
+    static String provenanceQuestion(List<String> blocked) {
+        List<String> shown = blocked.take(MAX_ECHOED_IDS).collect { String id -> id.length() <= MAX_ECHOED_ID_CHARS ? id : id.substring(0, MAX_ECHOED_ID_CHARS) + "..." }
+        String more = blocked.size() > MAX_ECHOED_IDS ? " (and ${blocked.size() - MAX_ECHOED_IDS} more)".toString() : ""
+        return "These values came only from system or customer data, not from you: ${shown.join(', ')}${more}. If you want them in the change, type them yourself.".toString()
     }
 
     private static Map response(String conversationId, String outcome, String reply) {
@@ -470,14 +481,14 @@ class AgentOrchestrator {
 
     // ---------------------------------------------------------------- limits
 
-    /** Router runs (one per accepted message) the person started in the last hour, in any tenant. */
+    /**
+     * Router runs (one per accepted message) the person started in the last hour, in any tenant: one count over the turn
+     * joined to its conversation's userId (darpan.agent.AgentTurnOfUser).
+     */
     static long turnsInLastHour(def ec, String userId) {
-        List ids = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.agent.AgentConversation", "agent rate limit: the person's own conversations")
-                .condition("userId", userId).selectField("conversationId").useCache(false).list()*.conversationId
-        if (!ids) return 0L
         Timestamp since = new Timestamp(System.currentTimeMillis() - 3_600_000L)
-        return TenantScopedFinder.findGlobalUnscoped(ec, "darpan.agent.AgentTurn", "agent rate limit: the person's own conversations")
-                .condition("conversationId", EntityCondition.IN, ids).condition("role", RoleSpec.ROUTER)
+        return TenantScopedFinder.findGlobalUnscoped(ec, "darpan.agent.AgentTurnOfUser", "agent rate limit: the person's own turns, every tenant")
+                .condition("userId", userId).condition("role", RoleSpec.ROUTER)
                 .condition("startedDate", EntityCondition.GREATER_THAN_EQUAL_TO, since).useCache(false).count()
     }
 
@@ -501,6 +512,14 @@ class AgentOrchestrator {
 
     // ---------------------------------------------------------------- rows
 
+    /** The finding is the tenant's and sits under one of this audit's statements. */
+    private static boolean findingOfAudit(def ec, String pinned, String auditId, String findingId) {
+        def finding = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditFinding", "findingId", findingId, pinned, WHY)
+        if (finding == null) return false
+        def statement = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditStatement", "statementId", finding.statementId, pinned, WHY)
+        return statement != null && statement.auditId == auditId
+    }
+
     private static String createConversation(def ec, String pinned, String userId, String auditId, String findingId) {
         String id = null
         ec.transaction.runRequireNew(null, "Could not start the agent conversation") {
@@ -523,6 +542,8 @@ class AgentOrchestrator {
 
     /** The conversation's messages: every write carries the pinned tenant and the next sequence number, in its own transaction. */
     static class Transcript {
+        /** Newest first; a duplicate sequence number (two sends at once) falls back to write time, then id. */
+        static final List<String> NEWEST_FIRST = ["-sequenceNum", "-lastUpdatedStamp", "-messageId"].asImmutable()
         final def ec
         final String pinned
         final String conversationId
@@ -532,7 +553,7 @@ class AgentOrchestrator {
             this.ec = ec
             this.pinned = pinned
             this.conversationId = conversationId
-            def last = rows().orderBy("-sequenceNum").limit(1).list()
+            def last = rows().orderBy(NEWEST_FIRST).limit(1).list()
             nextSeq = last ? (((last[0].sequenceNum ?: 0L) as long) + 1L) : 1L
         }
 
@@ -554,7 +575,7 @@ class AgentOrchestrator {
         /** The text of the person's last n messages before this one, oldest first. */
         List<String> earlierUserTexts(int n) {
             List<String> out = []
-            rows().condition("kind", "USER").orderBy("-sequenceNum").limit(n).list().each { msg ->
+            rows().condition("kind", "USER").orderBy(NEWEST_FIRST).limit(n).list().each { msg ->
                 Object parsed = parseJson(msg.contentJson as String)
                 List<String> texts = []
                 (parsed instanceof List ? (List) parsed : [parsed]).each { Object b ->
@@ -565,17 +586,14 @@ class AgentOrchestrator {
             return out.reverse()
         }
 
-        /**
-         * The last question put to the person, when it came from the router or the author (neither reads record text); a
-         * provenance question names ids seen only in records, so it is not passed on.
-         */
-        String lastSafeQuestion() {
-            def last = rows().condition("kind", "ASSISTANT").orderBy("-sequenceNum").limit(1).list()
+        /** The last question put to the person, [text, from], or null when the last reply asked none. */
+        Map lastQuestion() {
+            def last = rows().condition("kind", "ASSISTANT").orderBy(NEWEST_FIRST).limit(1).list()
             if (!last) return null
             Object parsed = parseJson(last[0].contentJson as String)
             if (!(parsed instanceof Map) || ((Map) parsed).role != "REPLY" || !(((Map) parsed).question instanceof Map)) return null
             Map q = (Map) ((Map) parsed).question
-            return q.from in [RoleSpec.ROUTER, RoleSpec.AUTHOR] ? q.text as String : null
+            return q.text ? [text: q.text as String, from: q.from as String] : null
         }
 
         /** The conversation's proposals so far: what the author drafted, for a CORRECTION. */
@@ -593,6 +611,17 @@ class AgentOrchestrator {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    static final String OTHER_QUESTION = "(the assistant asked a follow-up question)"
+
+    /**
+     * The last question as a role may read it: its text when it came from a role that reads no record text the reader may
+     * not; otherwise a placeholder. The router reads only its own questions (the author's may name ids from evidence); the
+     * author reads its own and the router's; a provenance question names ids seen only in records, so no role reads it.
+     */
+    static String questionFor(Map question, List<String> readable) {
+        return question.from in readable ? oneLine(question.text as String, 500) : OTHER_QUESTION
+    }
 
     private static List<Map> itemsView(List<Map> items) {
         return items.withIndex().collect { Map it, int i -> [index: i, kind: it.kind, span: it.span, refs: it.refs] as Map }
@@ -626,7 +655,8 @@ class AgentOrchestrator {
         String words
         List<String> masked = []
         List<String> earlier = []
-        String lastQuestion
+        /** [text, from] of the last question put to the person, or null. */
+        Map lastQuestion
         long deadline
         Transcript transcript
         Map<String, Map> proposals = new LinkedHashMap<>()

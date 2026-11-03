@@ -26,6 +26,26 @@ class PasteScrubberTests {
     }
 
     @Test
+    void "a secret at the end of a longer name, or quoted as JSON or config, is masked"() {
+        [
+                "access_token=abc111"                      : "abc111",
+                "token_secret=abc222"                      : "abc222",
+                "client_secret: abc333"                    : "abc333",
+                '{"password": "hunter2"}'                  : "hunter2",
+                '"apiKey":"shpat_x444"'                    : "shpat_x444",
+                "{'api-key': 'k555', 'next': 1}"           : "k555",
+                "Authorization: Basic dXNlcjpwYXNzNjY2"    : "dXNlcjpwYXNzNjY2",
+        ].each { String input, String secret ->
+            Map out = PasteScrubber.scrub(input)
+            assertFalse((out.text as String).contains(secret), "${secret} survived in ${out.text}")
+            assertFalse((out.masked as List).isEmpty(), input)
+        }
+        assertEquals('{"password": "[masked secret]"}', PasteScrubber.scrub('{"password": "hunter2"}').text)
+        assertEquals(["BASIC"], PasteScrubber.scrub("Authorization: Basic dXNlcjpwYXNz").masked)
+        assertEquals("A basic check on the tokens", PasteScrubber.scrub("A basic check on the tokens").text)
+    }
+
+    @Test
     void "a key inside an assignment is masked once, as a key"() {
         Map out = PasteScrubber.scrub("api_key=sk-ant-api03-zzz")
         assertEquals("api_key=[masked API key]", out.text)

@@ -22,6 +22,8 @@ class AgentToolExecutor {
     static final String NOT_PERMITTED = "TOOL_NOT_PERMITTED"
     static final String INVALID_INPUT = "INVALID_INPUT"
     static final String TOOL_FAILED = "TOOL_FAILED"
+    /** What the author reads when a write tool's service reported an error (its text may quote record data). */
+    static final String TOOL_ERROR = "TOOL_ERROR"
     /** A tool result longer than this is cut, so one large read cannot fill the context. */
     static final int MAX_RESULT_CHARS = 60_000
     /**
@@ -72,7 +74,7 @@ class AgentToolExecutor {
         Map params = new LinkedHashMap(input)
         if (tool.conversationScoped) params.conversationId = conversationId
         String service = tool.service as String
-        return AgentCallMarker.run {
+        Map done = AgentCallMarker.run {
             // Errors already on ec.message are set aside for the call and put back after it, so the call is not refused
             // because of them, and only the errors this call added are reported (and then cleared).
             ec.message.pushErrors()
@@ -92,6 +94,39 @@ class AgentToolExecutor {
                 ec.message.popErrors()
             }
         }
+        if (spec.role == RoleSpec.AUTHOR) done.modelContent = authorView(toolName, done.isError as boolean, done.content as String)
+        return done
+    }
+
+    /**
+     * What the author's model reads of a write tool's result (spec 10.3: the author never reads raw tool text). The full
+     * result stays in content, for the transcript; the model gets typed fields only: propose_change {proposalId, status,
+     * statusMessage, provenanceStatus, blockedCount, backtest {supported, reason, closedCount, openedCount, limits}} (no
+     * finding ids, record keys or exception detail), raise_ticket {ticketId, duplicate}, and a fixed TOOL_ERROR for any
+     * error the service reported.
+     */
+    static String authorView(String toolName, boolean isError, String content) {
+        if (isError) return content == TOOL_FAILED ? TOOL_FAILED : TOOL_ERROR
+        Object out
+        try { out = new groovy.json.JsonSlurper().parseText(content ?: "") } catch (Exception ignored) { out = null }
+        if (!(out instanceof Map)) return TOOL_ERROR
+        Map o = (Map) out
+        if (toolName == "propose_change") {
+            Map bt = o.backtest instanceof Map ? (Map) o.backtest : null
+            return JsonOutput.toJson([proposalId: token(o.proposalId), status: token(o.status), statusMessage: (o.statusMessage as String)?.take(300),
+                    provenanceStatus: token(o.provenanceStatus), blockedCount: o.blockedIds instanceof List ? ((List) o.blockedIds).size() : 0,
+                    backtest: bt == null ? null : [supported: bt.supported == true, reason: token(bt.reason),
+                            closedCount: bt.closed instanceof List ? ((List) bt.closed).size() : 0,
+                            openedCount: bt.opened instanceof List ? ((List) bt.opened).size() : 0,
+                            limits: bt.limits instanceof List ? ((List) bt.limits).collect { token(it) } : []]])
+        }
+        if (toolName == "raise_ticket") return JsonOutput.toJson([ticketId: token(o.ticketId), duplicate: o.duplicate == true])
+        return TOOL_ERROR
+    }
+
+    private static String token(Object v) {
+        String s = v?.toString()
+        return s != null && s ==~ /[A-Za-z0-9_\-.]{1,64}/ ? s : null
     }
 
     /** The service call, as the signed-in user, in its own transaction so a failed tool cannot roll back the turn's writes. */

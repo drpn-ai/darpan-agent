@@ -48,7 +48,8 @@ class AgentOrchestratorTests {
     private static final List<String> AGENT_ENTITIES = ["darpan.agent.AgentMessage", "darpan.agent.AgentTurn", "darpan.agent.AuditChangeProposal",
             "darpan.agent.BrainChangeTicket", "darpan.agent.AgentConversation"]
     private static final List<String> PROMPTS = ["router", "investigator", "author"].collect { "darpan/agent/prompts/${it}.md".toString() }
-    private static final List<String> SCHEMAS = ["router-items", "evidence", "propose-change", "raise-ticket"].collect { "darpan/agent/schemas/${it}.json".toString() }
+    private static final List<String> SCHEMAS = ["router-items", "evidence", "propose-change", "raise-ticket"].collect { "darpan/agent/schemas/${it}.json".toString() } +
+            ["darpan/agent/tools.json"]
 
     /** The key is there: availability is the core switch alone. */
     static final Closure<String> AVAILABLE = { def e -> AgentAvailability.resolve(AgentSwitch.state(e)) { new Object() } }
@@ -161,8 +162,8 @@ class AgentOrchestratorTests {
                 permissionUserGroupId: permissionGroupId, fromDate: FROM])
     }
 
-    private Map send(AgentOrchestrator o, String words, String findingId = FINDING) {
-        Map out = o.send(ec, null, AUDIT, findingId, words)
+    private Map send(AgentOrchestrator o, String words, String findingId = FINDING, String conversationId = null) {
+        Map out = o.send(ec, conversationId, AUDIT, findingId, words)
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         assertNotNull(out)
         return out
@@ -299,6 +300,104 @@ class AgentOrchestratorTests {
         assertEquals("QUESTION", out.outcome)
         assertTrue((out.question.text as String).contains("CM-7777"), out.question.toString())
         assertEquals("PROVENANCE", out.question.from)
+        assertTrue((out.question.text as String).startsWith("These values came only from system or customer data, not from you: CM-7777."), out.question.text as String)
+    }
+
+    @Test
+    void "a provenance question echoes at most five ids of at most 64 characters"() {
+        String longId = "X" * 80
+        String q = AgentOrchestrator.provenanceQuestion([longId, "A1", "A2", "A3", "A4", "A5", "A6"])
+        assertTrue(q.contains("X" * 64 + "..."), q)
+        assertFalse(q.contains("X" * 65), q)
+        assertTrue(q.contains("A4") && !q.contains("A5,") && !q.contains("A6"), q)
+        assertTrue(q.contains("(and 2 more)"), q)
+        assertTrue(q.endsWith("If you want them in the change, type them yourself."), q)
+    }
+
+    @Test
+    void "the author reads typed write-tool results, never backtest keys, ids or error text"() {
+        Closure original = darpan.agent.pipeline.AuditChangePlanner.backtest
+        darpan.agent.pipeline.AuditChangePlanner.backtest = { def e, String t, String k, Map tg, Map m, Map c ->
+            [supported: true, reason: null, basisExecutionId: "EXEC-1", closed: ["F-SECRET1"], opened: ["REC-LEAK-42"], unchanged: 0,
+             limits: ["LATEST_WINDOW_ONLY"], detail: "exception detail QQ9"]
+        }
+        try {
+            String words = "CM-2002 is a test memo; leave it out."
+            Map bad = exclusionFor("CM-2002")
+            // Schema-valid, off the contract: the service refuses it with an error naming what is wrong.
+            ((Map) bad.target).remove("fileSide")
+            def g = new AgentRoleLoopTests.ScriptedGateway([
+                    router([item("CAUSE_FEEDBACK", words)]),
+                    evidence([fact("savedRunId", runId, "CONFIG")]),
+                    authorSays([toolUse("tu_1", "propose_change", exclusionFor("CM-2002")), toolUse("tu_2", "propose_change", bad)]),
+                    authorEnds("Drafted an exclusion of CM-2002.")])
+            Map out = send(new AgentOrchestrator(g, AVAILABLE), words)
+            assertEquals(1, (out.proposals as List).size(), out.toString())
+
+            String next = sentJson(g, 3)
+            ["REC-LEAK-42", "F-SECRET1", "QQ9", "EXEC-1", "fileSide is required"].each {
+                assertFalse(next.contains(it), "${it} reached the author")
+            }
+            List<Map> results = (List<Map>) ((Map) ((List) wire(g.sent[3]).messages)[2]).content
+            Map typed = (Map) new JsonSlurper().parseText(results.find { it.tool_use_id == "tu_1" }.content as String)
+            assertEquals([supported: true, reason: null, closedCount: 1, openedCount: 1, limits: ["LATEST_WINDOW_ONLY"]], typed.backtest)
+            assertEquals(0, typed.blockedCount)
+            assertEquals("TOOL_ERROR", results.find { it.tool_use_id == "tu_2" }.content)
+            String stored = JsonOutput.toJson(messages(out.conversationId as String).findAll { it.kind == "TOOL_RESULT" })
+            assertTrue(stored.contains("REC-LEAK-42") && stored.contains("fileSide is required"), "the transcript keeps the full results")
+        } finally {
+            darpan.agent.pipeline.AuditChangePlanner.backtest = original
+        }
+    }
+
+    @Test
+    void "the router reads only its own last question and gets a placeholder for the question the author asked"() {
+        String words = "Leave CM-2002 out."
+        def g = new AgentRoleLoopTests.ScriptedGateway([
+                router([item("CAUSE_FEEDBACK", words)]),
+                evidence([fact("savedRunId", runId, "CONFIG")]),
+                authorSays([toolUse("tu_1", "ask_human", [question: "Is CM-5555 the memo you mean?"])]),
+                router([item("CAUSE_FEEDBACK", "yes")]),
+                evidence([fact("savedRunId", runId, "CONFIG")]),
+                authorEnds("Noted.")])
+        def o = new AgentOrchestrator(g, AVAILABLE)
+        Map first = send(o, words)
+        assertEquals("QUESTION", first.outcome)
+        send(o, "yes", FINDING, first.conversationId as String)
+        String routerAgain = sentJson(g, 3)
+        assertFalse(routerAgain.contains("CM-5555"), "the author's question can name ids from evidence")
+        assertTrue(routerAgain.contains(AgentOrchestrator.OTHER_QUESTION))
+        assertTrue(routerAgain.contains("Leave CM-2002 out."), "the router still sees the person's earlier words")
+        assertTrue(sentJson(g, 5).contains("CM-5555"), "the author reads its own question")
+    }
+
+    @Test
+    void "a switch turned off mid-turn stops the next role with AGENT_OFF"() {
+        def g = new AgentRoleLoopTests.ScriptedGateway([{
+            asSystem { upsert("darpan.auth.TenantSetting", [companyUserGroupId: MINE, agentEnabled: "N"]) }
+            router([item("EXPLAIN", "Why is this one open?")])
+        }])
+        Map out = send(new AgentOrchestrator(g, AVAILABLE), "Why is this one open?")
+        assertEquals("AGENT_OFF", out.outcome)
+        assertEquals(1, g.sent.size(), "the investigator never starts")
+    }
+
+    @Test
+    void "a finding of another audit is refused"() {
+        asSystem {
+            upsert("darpan.audit.Audit", [auditId: "AGO_AUDIT2", companyUserGroupId: MINE, auditCode: "weekly", auditName: "Weekly", periodEnumId: "AUDP_MONTH"])
+            upsert("darpan.audit.AuditStatement", [statementId: "AGO_W1", companyUserGroupId: MINE, auditId: "AGO_AUDIT2", statementCode: "R1",
+                    categoryEnumId: "AUDC_RETURNS", weightEnumId: "AUDSW_FIRM", sequenceNum: 1L, statementText: "Weekly one", isActive: "Y"])
+            upsert("darpan.audit.AuditFinding", [findingId: "F-90002", companyUserGroupId: MINE, statementId: "AGO_W1", checkId: "AGO_CHK",
+                    recordKey: "CM-3003", period: "2026-10", stateEnumId: "AUDFS_OPEN", headline: "Memo CM-3003 is open",
+                    firstFoundDate: Date.valueOf("2026-10-08"), lastSeenDate: Date.valueOf("2026-10-08")])
+        }
+        def g = new AgentRoleLoopTests.ScriptedGateway([])
+        assertNull(new AgentOrchestrator(g, AVAILABLE).send(ec, null, AUDIT, "F-90002", "Why is this one open?"))
+        assertTrue(ec.message.errorsString.contains("was not found in audit"), ec.message.errorsString)
+        ec.message.clearErrors()
+        assertEquals(0, g.sent.size())
+        assertEquals(0L, count("darpan.agent.AgentConversation"))
     }
 
     @Test
