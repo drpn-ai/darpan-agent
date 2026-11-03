@@ -29,6 +29,9 @@
         },
         "fieldExpression": {
           "absentOr": "$PRIMARY_ID"
+        },
+        "operator": {
+          "absentOr": "EXCLUDE_IN"
         }
       }
     }

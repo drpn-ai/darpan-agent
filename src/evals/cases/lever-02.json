@@ -29,7 +29,9 @@
       },
       "after": {
         "conclusionCodes": {
-          "includes": "CONC_EVAL_STORE"
+          "equals": [
+            "CONC_EVAL_STORE"
+          ]
         }
       }
     }
