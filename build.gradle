@@ -1,0 +1,82 @@
+/*
+ * Darpan embedded agent component (DAR-BE-159). Pins the Anthropic Java SDK in its own lib/.
+ */
+
+apply plugin: 'groovy'
+
+java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+
+def componentNode = parseComponent(project)
+version = componentNode.'@version'
+def jarBaseName = componentNode.'@name'
+def moquiDir = projectDir.parentFile.parentFile.parentFile
+def frameworkDir = file(moquiDir.absolutePath + '/framework')
+
+repositories {
+    flatDir name: 'localLib', dirs: frameworkDir.absolutePath + '/lib'
+    mavenCentral()
+    maven {
+        url = 'https://jitpack.io'
+        content { includeModule('com.github.saasquatch', 'json-schema-inferrer') }
+    }
+}
+
+sourceSets {
+    main { groovy { srcDirs = ['src/main/groovy'] } }
+    test { groovy { srcDirs = ['src/test/groovy'] } }
+}
+
+tasks.withType(JavaCompile) { options.compilerArgs << "-proc:none" }
+tasks.withType(GroovyCompile) { options.compilerArgs << "-proc:none" }
+
+configurations.all {
+    resolutionStrategy.eachDependency { details ->
+        // The framework pins jackson-databind 2.20.1 (framework/build.gradle); every jackson module must agree.
+        if (details.requested.group == 'com.fasterxml.jackson' || details.requested.group.startsWith('com.fasterxml.jackson.')) {
+            // jackson-annotations is released as 2.20 (no patch), per jackson-bom 2.20.1.
+            details.useVersion(details.requested.name == 'jackson-annotations' ? '2.20' : '2.20.1')
+        }
+    }
+}
+
+dependencies {
+    implementation project(':framework')
+    // Moqui loads darpan on the shared classloader; compile against it only (moqui-gql style).
+    compileOnly project(':runtime:component:darpan')
+    implementation 'com.anthropic:anthropic-java:3.2.0'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'
+    testImplementation project(':runtime:component:darpan')
+    testImplementation project(':runtime:component:darpan').sourceSets.test.output
+    testImplementation 'org.apache.logging.log4j:log4j-core:2.25.2' // capture log output in the key-leak test (test only)
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.9.2'
+    testRuntimeOnly 'jakarta.servlet:jakarta.servlet-api:6.1.0'
+}
+
+check.dependsOn.clear()
+
+test { useJUnitPlatform() }
+
+task cleanLib(type: Delete) { delete fileTree(dir: projectDir.absolutePath + '/lib', include: '*') }
+clean.dependsOn cleanLib
+
+jar {
+    destinationDirectory = file(projectDir.absolutePath + '/lib')
+    archiveBaseName = jarBaseName
+}
+
+task copyDependencies {
+    doLast {
+        copy {
+            from (configurations.runtimeClasspath
+                    - project(':framework').configurations.runtimeClasspath
+                    - project(':framework').tasks.named('jar').get().archiveFile.get().asFile
+                    - project(':runtime:component:darpan').configurations.runtimeClasspath
+                    - project(':runtime:component:darpan').tasks.named('jar').get().archiveFile.get().asFile)
+            into file(projectDir.absolutePath + '/lib')
+        }
+    }
+}
+copyDependencies.dependsOn cleanLib
+jar.dependsOn copyDependencies
