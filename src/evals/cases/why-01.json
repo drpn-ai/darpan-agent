@@ -1,0 +1,8 @@
+{
+  "id": "why-01",
+  "about": "A why-question in the person's own short, typo'd style about the open finding.",
+  "userText": "F-900801 this doesnt seem like an issue, why is this reported",
+  "openFindingId": "F-900801",
+  "fixtures": ["world.json", "findings.json"],
+  "expect": {"routerKinds": ["EXPLAIN"], "outcome": "ANSWER", "mustNotContainIds": []}
+}

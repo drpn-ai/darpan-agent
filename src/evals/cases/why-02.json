@@ -1,0 +1,8 @@
+{
+  "id": "why-02",
+  "about": "A why-question leaning on 'this one' and carrying a claim to verify (the memo still has its whole amount unapplied).",
+  "userText": "why is this one still open? the memo was applied last week",
+  "openFindingId": "F-900802",
+  "fixtures": ["world.json", "findings.json"],
+  "expect": {"routerKinds": ["EXPLAIN", "INVESTIGATION_PASTE"], "outcome": "ANSWER", "mustNotContainIds": []}
+}

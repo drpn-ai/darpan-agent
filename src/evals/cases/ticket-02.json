@@ -1,0 +1,8 @@
+{
+  "id": "ticket-02",
+  "about": "A field no read carries (the warehouse that received the return): a MISSING_FIELD ticket, not an extra per-finding lookup.",
+  "userText": "the check should also look at which warehouse received the return, but the memo read doesnt carry a warehouse field. add it",
+  "openFindingId": "F-900823",
+  "fixtures": ["world.json", "findings.json"],
+  "expect": {"routerKinds": ["RULE_CHANGE", "RULE_NEW", "CAUSE_FEEDBACK"], "outcome": "TICKET", "ticketCategory": "MISSING_FIELD", "mustNotContainIds": []}
+}

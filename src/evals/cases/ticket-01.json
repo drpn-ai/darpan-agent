@@ -1,0 +1,8 @@
+{
+  "id": "ticket-01",
+  "about": "A new shared cause no tenant lever can express (spec 2: a cause widened to 'any second claim on one product'): a ticket, never a proposal.",
+  "userText": "F-900821 and F-900822 are the same claim made twice on one product. any second claim on one product should be its own cause, not memo left open",
+  "openFindingId": "F-900821",
+  "fixtures": ["world.json", "findings.json"],
+  "expect": {"routerKinds": ["RULE_NEW", "CAUSE_FEEDBACK", "RULE_CHANGE"], "outcome": "TICKET", "ticketCategory": "NEW_OR_WIDER_CAUSE", "mustNotContainIds": []}
+}

@@ -1,0 +1,8 @@
+{
+  "id": "why-03",
+  "about": "A why-question about which statement a finding sits under (no made-up checks: R1 and R2 are the only statements).",
+  "userText": "what does R2 actually check, and why is CM90013 under it and not R1?",
+  "openFindingId": "F-900803",
+  "fixtures": ["world.json", "findings.json"],
+  "expect": {"routerKinds": ["EXPLAIN"], "outcome": "ANSWER", "mustNotContainIds": []}
+}

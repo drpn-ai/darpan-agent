@@ -1,0 +1,35 @@
+{
+  "kind": "world",
+  "about": "DAR-BE-159 agent eval. A synthetic tenant: one month-close audit over one open-credit-memo run. Every name and id is made up; nothing comes from a real tenant, brand, customer or order.",
+  "tenant": {"userGroupId": "EVAL_TENANT", "description": "Eval tenant", "timeZone": "UTC"},
+  "user": {"username": "test.customer", "userId": "TEST_CUSTOMER_USER"},
+  "conclusions": {
+    "CONC_EVAL_OPEN": "Memo left open",
+    "CONC_EVAL_STORE": "Store kept the item",
+    "CONC_EVAL_VOID": "Memo voided"
+  },
+  "source": {
+    "nsAuthConfigId": "EVAL_AUTH",
+    "queryId": "EVAL_Q",
+    "recordType": "CustCred",
+    "description": "open credit memos",
+    "fields": [["tranId", "tranid"], ["status", "status"], ["memoOrigin", "memoorigin"], ["createdFrom", "createdfrom"]]
+  },
+  "run": {"runName": "Open credit memos", "primaryIdExpression": "$.records[*].tranId"},
+  "conclusionTree": [
+    {"key": "1", "conclusion": "CONC_EVAL_OPEN", "bucket": "FINDING", "fix": "Re-sync the memo",
+     "conditions": [{"field": "status", "operator": "IN", "values": ["Open", "Pending"], "checkLabel": "Memo is open"}]},
+    {"key": "2", "conclusion": "CONC_EVAL_STORE", "bucket": "FINDING", "fix": "Ask the store",
+     "conditions": [{"field": "memoOrigin", "operator": "NOT_BLANK", "checkLabel": "Has an origin"}]}
+  ],
+  "audit": {"auditId": "EVAL_AUDIT", "auditCode": "month-close", "auditName": "Month close", "periodEnumId": "AUDP_MONTH"},
+  "statements": [
+    {"statementId": "EVAL_R1", "statementCode": "R1", "categoryEnumId": "AUDC_RETURNS", "weightEnumId": "AUDSW_FIRM", "sequenceNum": 1,
+     "statementText": "Every open credit memo is applied or refunded within a day."},
+    {"statementId": "EVAL_R2", "statementCode": "R2", "categoryEnumId": "AUDC_RETURNS", "weightEnumId": "AUDSW_FIRM", "sequenceNum": 2,
+     "statementText": "Every return the store kept has its credit memo applied."}
+  ],
+  "check": {"checkId": "EVAL_CHK", "checkCode": "credits-open", "label": "Open credit memos", "graceDays": 1,
+            "headlineTemplate": "Memo {tranId} is open",
+            "links": [{"statementId": "EVAL_R1", "diffTypes": "FINDING"}, {"statementId": "EVAL_R2", "diffTypes": "FINDING"}]}
+}
