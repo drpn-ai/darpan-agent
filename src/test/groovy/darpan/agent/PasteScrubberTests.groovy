@@ -166,6 +166,79 @@ class PasteScrubberTests {
     }
 
     @Test
+    void "a secret in JSON escaped inside a string is masked"() {
+        Map out = PasteScrubber.scrub('{\\"password\\":\\"hunter2\\"}')
+        assertFalse((out.text as String).contains("hunter2"), out.text as String)
+        assertEquals('{\\"password\\":\\"[masked secret]\\"}', out.text)
+        Map spaced = PasteScrubber.scrub('"{\\"token\\": \\"abc def\\"}"')
+        String t = spaced.text as String
+        assertFalse(t.contains("abc") || t.contains("def"), t)
+        assertEquals('"{\\"token\\": \\"[masked secret]\\"}"', t)
+        assertEquals(["SECRET"], spaced.masked)
+    }
+
+    @Test
+    void "a secret in double-escaped JSON is masked and the structure survives"() {
+        Map out = PasteScrubber.scrub('{\\\\\\"client_secret\\\\\\":\\\\\\"s3 cr3t\\\\\\",\\\\\\"n\\\\\\":1}')
+        String t = out.text as String
+        assertFalse(t.contains("s3") || t.contains("cr3t"), t)
+        assertEquals('{\\\\\\"client_secret\\\\\\":\\\\\\"[masked secret]\\\\\\",\\\\\\"n\\\\\\":1}', t)
+    }
+
+    @Test
+    void "a curly-quoted secret is masked through its closing quote"() {
+        Map out = PasteScrubber.scrub("password: “abc def” and more")
+        String t = out.text as String
+        assertFalse(t.contains("abc") || t.contains("def"), t)
+        assertEquals("password: “[masked secret]” and more", t)
+        assertEquals("token = ‘[masked secret]’", PasteScrubber.scrub("token = ‘x y’").text)
+        assertEquals("secret: «[masked secret]»", PasteScrubber.scrub("secret: «x y»").text)
+        assertEquals("“password”: “[masked secret]", PasteScrubber.scrub("“password”: “no close here").text)
+    }
+
+    @Test
+    void "passcode and passphrase keys are masked"() {
+        assertEquals("passcode=[masked secret]", PasteScrubber.scrub("passcode=1234").text)
+        assertEquals("passphrase: [masked secret] then", PasteScrubber.scrub("passphrase: open-sesame then").text)
+    }
+
+    @Test
+    void "a value that only starts like a marker is masked"() {
+        Map out = PasteScrubber.scrub("password=[maskedhunter2")
+        assertFalse((out.text as String).contains("hunter2"), out.text as String)
+        assertEquals("password=[masked secret]", out.text)
+        assertEquals("token=[masked secret]", PasteScrubber.scrub("token=[masked secret]xyz").text)
+        assertEquals('{"token": "[masked secret]"}', PasteScrubber.scrub('{"token": "[masked secret] xyz"}').text)
+        assertEquals("Authorization: [masked secret]", PasteScrubber.scrub("Authorization: basic dXNlcjpwYXNz").text)
+    }
+
+    @Test
+    void "scrubbing an already scrubbed string returns it unchanged"() {
+        String input = "password: hunter2, {\"token\":\"x,y}z\"} Authorization: Bearer abc.def and Basic dXNlcjpw " +
+                "api_key=sk-ant-api03-zzz key AKIAABCDEFGHIJKLMNOP {\\\"password\\\":\\\"p q\\\"} passcode=1234 " +
+                "password: “abc def” (secret=zz11); done secret=abc] next {token: abc99} " +
+                "{\"Authorization\":\"Bearer eyJ0.x\"} jo@example.org +1 (555) 010-2030"
+        Map once = PasteScrubber.scrub(input)
+        Map twice = PasteScrubber.scrub(once.text as String)
+        assertEquals(once.text, twice.text)
+        assertEquals([], twice.masked)
+        ["hunter2", "x,y}z", "abc.def", "dXNlcjpw", "zzz", "AKIAABCDEFGHIJKLMNOP", "p q", "1234", "abc def", "zz11", "abc99",
+         "eyJ0", "example.org", "010-2030"].each { assertFalse((once.text as String).contains(it), "${it} survived: ${once.text}") }
+    }
+
+    @Test
+    void "a 20000-character escaped-quote value is masked quickly"() {
+        long t0 = System.nanoTime()
+        Map out = PasteScrubber.scrub('{\\"access_token\\": \\"' + ("q" * 20_000) + '\\", \\"n\\": 1}')
+        assertEquals('{\\"access_token\\": \\"[masked secret]\\", \\"n\\": 1}', out.text)
+        Map open = PasteScrubber.scrub('password: \\"' + ('a\\\\\\"' * 5_000))
+        assertEquals('password: \\"[masked secret]', open.text)
+        Map slashes = PasteScrubber.scrub('password: \\"' + ('\\' * 20_000))
+        assertEquals('password: \\"[masked secret]', slashes.text)
+        assertTrue(System.nanoTime() - t0 < 2_000_000_000L, "took ${(System.nanoTime() - t0) / 1_000_000} ms")
+    }
+
+    @Test
     void "plain text is unchanged and nothing is reported"() {
         Map out = PasteScrubber.scrub("Why is F-20761 open? The return was received.")
         assertEquals("Why is F-20761 open? The return was received.", out.text)
