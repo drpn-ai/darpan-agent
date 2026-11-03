@@ -598,11 +598,10 @@ class AgentOrchestratorTests {
         assertEquals([20_000L, 40_000L], o.clocks, "the investigator gets the 40 s left, not its own 90 s")
         assertEquals("INCOMPLETE", out.outcome, "2 s left is too little to start the author")
         assertEquals(2, g.sent.size())
-        // R54: each request's attempts (the SDK retries twice) and the backoff between them fit in its role's share of the 240 s.
+        // R55: each attempt is given what is left of its role's share of the 240 s, never more.
         [g.timeouts, o.clocks].transpose().each { List pair ->
-            long perAttempt = ((java.time.Duration) pair[0]).toMillis()
-            assertTrue(perAttempt * darpan.agent.loop.AgentRoleLoop.ATTEMPTS + darpan.agent.loop.AgentRoleLoop.RETRY_BACKOFF_RESERVE_MS <= (pair[1] as long),
-                    "${perAttempt} ms per attempt within ${pair[1]} ms")
+            long timeout = ((java.time.Duration) pair[0]).toMillis()
+            assertTrue(timeout <= (pair[1] as long) && timeout > (pair[1] as long) - 5_000L, "${timeout} ms of the role's ${pair[1]} ms")
         }
     }
 

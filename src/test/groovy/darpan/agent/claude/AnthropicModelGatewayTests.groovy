@@ -50,11 +50,35 @@ class AnthropicModelGatewayTests {
     }
 
     @Test
-    void "closes the stream and propagates when it throws mid-way"() {
+    void "a stream that fails mid-way closes and carries the usage it reported"() {
         def fake = new FakeStream(helloEvents().take(3), new IllegalArgumentException("boom"))
-        def e = assertThrows(IllegalArgumentException) { AnthropicModelGateway.accumulate(fake) }
-        assertEquals("boom", e.message)
+        def e = assertThrows(StreamInterruptedException) { AnthropicModelGateway.accumulate(fake) }
+        assertEquals("boom", e.cause.message)
+        assertEquals(1L, e.usage.inputTokens())
+        assertEquals(1L, e.usage.outputTokens(), "message_start's count")
+        assertEquals("claude-sonnet-4-5", e.model)
         assertEquals(1, fake.closed)
+
+        // After a message_delta its cumulative counts are the ones billed.
+        def later = new FakeStream(helloEvents().take(6), new IllegalStateException("reset"))
+        assertEquals(5L, assertThrows(StreamInterruptedException) { AnthropicModelGateway.accumulate(later) }.usage.outputTokens())
+    }
+
+    @Test
+    void "a failure before the first event is rethrown as it came, so it may be retried"() {
+        def io = new com.anthropic.errors.AnthropicIoException("connection reset")
+        def fake = new FakeStream([], io)
+        assertSame(io, assertThrows(com.anthropic.errors.AnthropicIoException) { AnthropicModelGateway.accumulate(fake) })
+        assertEquals(1, fake.closed)
+    }
+
+    @Test
+    void "an attempt connects in 10 s, reads with a 30 s idle limit and ends by the deadline it is given"() {
+        def t = AnthropicModelGateway.attemptTimeout(java.time.Duration.ofSeconds(117))
+        assertEquals(java.time.Duration.ofSeconds(10), t.connect())
+        assertEquals(java.time.Duration.ofSeconds(30), t.read())
+        assertEquals(java.time.Duration.ofSeconds(117), t.request())
+        assertEquals(0, AgentClientFactory.SDK_MAX_RETRIES, "the SDK never retries; AgentRoleLoop does, before streaming only")
     }
 
     @Test

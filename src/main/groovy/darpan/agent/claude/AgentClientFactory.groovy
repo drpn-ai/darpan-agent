@@ -18,12 +18,11 @@ class AgentClientFactory {
     static final List<String> ALLOWED_HOSTS = ["api.anthropic.com"].asImmutable()
 
     /**
-     * The SDK retries a failed attempt (connection error, timeout, 408, 409, 429, 5xx) this many times, so one request is
-     * up to MAX_RETRIES + 1 attempts. RequestOptions.timeout is per attempt (anthropic-java 3.2.0: it sets Timeout.request,
-     * which the OkHttp client applies as each call's callTimeout; RetryingHttpClient re-executes with the same options),
-     * so AgentRoleLoop divides what is left by the attempts.
+     * The SDK does not retry (R55): its retries would re-run a request whose stream already started, and each attempt's
+     * Timeout.request is OkHttp's callTimeout over the streamed body. AgentRoleLoop retries itself, only before any
+     * streamed byte and only inside the turn's deadline.
      */
-    static final int MAX_RETRIES = 2
+    static final int SDK_MAX_RETRIES = 0
     private static final Object LOCK = new Object()
     private static String cachedFingerprint
     private static AnthropicClient cachedClient
@@ -37,7 +36,7 @@ class AgentClientFactory {
         synchronized (LOCK) {
             if (cachedClient != null && fingerprint == cachedFingerprint) return cachedClient
             AnthropicClient replaced = cachedClient
-            cachedClient = AnthropicOkHttpClient.builder().apiKey(key).baseUrl(baseUrl).maxRetries(MAX_RETRIES).build()
+            cachedClient = AnthropicOkHttpClient.builder().apiKey(key).baseUrl(baseUrl).maxRetries(SDK_MAX_RETRIES).build()
             cachedFingerprint = fingerprint
             closeQuietly(replaced)
             return cachedClient

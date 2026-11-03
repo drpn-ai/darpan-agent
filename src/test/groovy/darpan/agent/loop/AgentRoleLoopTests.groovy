@@ -86,10 +86,31 @@ class AgentRoleLoopTests {
 
     static class CountingLoop extends AgentRoleLoop {
         CountingExecutor executor
+        /** Retry waits, recorded instead of slept. */
+        final List<Long> pauses = []
+        /** A fixed clock when set (tests move it); the real one otherwise. */
+        Long clock = null
         @Override
         protected AgentToolExecutor executor(RoleSpec spec, String conversationId) {
             executor = new CountingExecutor(spec, conversationId)
             return executor
+        }
+        @Override
+        protected long now() { return clock != null ? clock : super.now() }
+        @Override
+        protected void pause(long ms) { pauses << ms; if (clock != null) clock += ms }
+    }
+
+    static AnthropicServiceExceptionFactory errors = new AnthropicServiceExceptionFactory()
+
+    /** SDK service errors with a status and optional headers, built the SDK's way. */
+    static class AnthropicServiceExceptionFactory {
+        com.anthropic.errors.AnthropicServiceException status(int code, Map<String, String> headers = [:]) {
+            Headers.Builder h = Headers.builder()
+            headers.each { String k, String v -> h.put(k, v) }
+            if (code == 429) return RateLimitException.builder().headers(h.build()).body(JsonValue.from([:])).build()
+            if (code >= 500 && code != 529) return InternalServerException.builder().statusCode(code).headers(h.build()).body(JsonValue.from([:])).build()
+            return com.anthropic.errors.UnexpectedStatusCodeException.builder().statusCode(code).headers(h.build()).body(JsonValue.from([:])).build()
         }
     }
 
@@ -316,14 +337,16 @@ class AgentRoleLoopTests {
     void "gateway 503 ends UNAVAILABLE and leaves no proposal row"() {
         def e503 = InternalServerException.builder().statusCode(503).headers(Headers.builder().build()).body(JsonValue.from([:])).build()
         String turnId = turn(author())
-        RoleResult r = new CountingLoop().runRole(ec, author(), MINE, ask("Exclude the test orders."), new ScriptedGateway([e503]), turnId)
-        assertEquals("UNAVAILABLE", r.outcome)
+        def loop503 = new CountingLoop()
+        RoleResult r = loop503.runRole(ec, author(), MINE, ask("Exclude the test orders."), new ScriptedGateway([e503, e503, e503]), turnId)
+        assertEquals("UNAVAILABLE", r.outcome, "two retries, then unavailable")
+        assertEquals([500L, 1000L], loop503.pauses)
         assertEquals(0L, count("darpan.agent.AuditChangeProposal"))
         assertEquals(0L, count("darpan.agent.BrainChangeTicket"))
         assertEquals("UNAVAILABLE", ec.entity.find("darpan.agent.AgentTurn").condition("turnId", turnId).useCache(false).one().outcome)
 
         def e429 = RateLimitException.builder().headers(Headers.builder().build()).body(JsonValue.from([:])).build()
-        assertEquals("UNAVAILABLE", run(author(), new ScriptedGateway([e429])).outcome)
+        assertEquals("UNAVAILABLE", run(author(), new ScriptedGateway([e429, e429, e429])).outcome)
         assertEquals("UNAVAILABLE", run(author(), new ScriptedGateway([new darpan.agent.claude.ModelUnavailableException("No Claude API key is configured")])).outcome)
         assertEquals(0L, count("darpan.agent.AuditChangeProposal"))
     }
@@ -537,38 +560,78 @@ class AgentRoleLoopTests {
     }
 
     @Test
-    void "every request's attempts fit in what is left of the role, which the orchestrator caps at the turn's 240 s"() {
-        assertEquals(3, AgentRoleLoop.ATTEMPTS, "the client retries twice")
-        assertEquals(79_333L, AgentRoleLoop.attemptTimeout(240_000L).toMillis(), "(240 s - 2 s reserve) / 3")
-        assertEquals(5_000L, AgentRoleLoop.attemptTimeout(AgentRoleLoop.MIN_REQUEST_START_MS).toMillis())
-        (AgentRoleLoop.MIN_REQUEST_START_MS..240_000L).step(997) { long left ->
-            long t = AgentRoleLoop.attemptTimeout(left).toMillis()
-            assertTrue(t >= AgentRoleLoop.MIN_REQUEST_TIMEOUT_MS && t * AgentRoleLoop.ATTEMPTS + AgentRoleLoop.RETRY_BACKOFF_RESERVE_MS <= left,
-                    "${left} ms left: ${t} ms per attempt")
-        }
-
-        long cap = 240_000L
-        def gateway = new ScriptedGateway([
-                msg("tool_use", [toolUse("tu_1", "search_knowledge", [words: "a"])]),
-                msg("end_turn", [text("Done.")])])
-        long started = System.currentTimeMillis()
-        RoleResult r = run(investigator().copy(wallClockMs: cap), gateway)
+    void "a 529 before any streamed byte is retried and the retry succeeds"() {
+        def loop = new CountingLoop()
+        def gateway = new ScriptedGateway([errors.status(529), msg("end_turn", [text("Done after a retry.")])])
+        RoleResult r = run(investigator(), gateway, loop)
         assertEquals("DONE", r.outcome)
-        assertEquals(2, gateway.timeouts.size())
-        long elapsed = System.currentTimeMillis() - started
-        gateway.timeouts.each { java.time.Duration t ->
-            assertTrue(t.toMillis() * AgentRoleLoop.ATTEMPTS + AgentRoleLoop.RETRY_BACKOFF_RESERVE_MS <= cap, "${t} x ${AgentRoleLoop.ATTEMPTS} fits ${cap} ms")
-            assertTrue(t.toMillis() >= (cap - elapsed - AgentRoleLoop.RETRY_BACKOFF_RESERVE_MS).intdiv(AgentRoleLoop.ATTEMPTS) - 1, "${t} is what is left, divided")
-        }
-        assertTrue(gateway.timeouts[1] <= gateway.timeouts[0], "the second request gets what is left after the first")
+        assertEquals(2, gateway.sent.size())
+        assertEquals([500L], loop.pauses, "the first backoff")
+        assertEquals(1, r.requestCount, "only the answered request counts")
+
+        def honoured = new CountingLoop()
+        def limited = new ScriptedGateway([errors.status(429, ["retry-after-ms": "1200"]), errors.status(503, ["retry-after": "2"]),
+                                           msg("end_turn", [text("Done.")])])
+        assertEquals("DONE", run(investigator(), limited, honoured).outcome)
+        assertEquals([1200L, 2000L], honoured.pauses, "Retry-After-Ms, then Retry-After in seconds")
+        assertEquals(3, limited.sent.size())
+
+        def io = new CountingLoop()
+        def dropped = new ScriptedGateway([new com.anthropic.errors.AnthropicIoException("connection reset", null), msg("end_turn", [text("Done.")])])
+        assertEquals("DONE", run(investigator(), dropped, io).outcome)
+        assertEquals(2, dropped.sent.size(), "a connection error before streaming is retried")
     }
 
     @Test
-    void "a request whose attempts could not fit in what is left is not sent"() {
-        def gateway = new ScriptedGateway([msg("end_turn", [text("Never sent.")])])
-        RoleResult r = run(investigator().copy(wallClockMs: AgentRoleLoop.MIN_REQUEST_START_MS - 1), gateway)
-        assertEquals("BUDGET", r.outcome)
-        assertEquals(0, gateway.sent.size(), "less than 3 x 5 s plus the backoff reserve is left")
+    void "a stream that fails after it started is not retried and its usage is recorded"() {
+        def usage = MAPPER.readValue('{"input_tokens":1000,"output_tokens":50,"cache_read_input_tokens":200}', com.anthropic.models.messages.Usage)
+        def loop = new CountingLoop()
+        def gateway = new ScriptedGateway([new darpan.agent.claude.StreamInterruptedException(usage, "claude-opus-5-5", new IOException("stream reset")),
+                                           msg("end_turn", [text("never sent")])])
+        String turnId = turn(author())
+        RoleResult r = loop.runRole(ec, author(), MINE, ask("x"), gateway, turnId)
+        assertEquals("UNAVAILABLE", r.outcome)
+        assertEquals(1, gateway.sent.size(), "never retried once streaming started")
+        assertEquals([], loop.pauses)
+        def row = turnRow(turnId)
+        assertEquals(1L, row.requestCount as long)
+        assertEquals(1000L, row.inputTokens as long)
+        assertEquals(50L, row.outputTokens as long)
+        assertEquals(200L, row.cacheReadTokens as long)
+        assertEquals(AgentUsageLedger.costMicros("claude-opus-5-5", usage), row.costMicros as long, "priced as usual, so the daily cap counts it")
+        assertEquals("UNAVAILABLE", row.outcome)
+    }
+
+    @Test
+    void "each attempt is given all the time left before the deadline"() {
+        def loop = new CountingLoop(clock: 1_000_000L)
+        def gateway = new ScriptedGateway([
+                { loop.clock += 30_000L; msg("tool_use", [toolUse("tu_1", "search_knowledge", [words: "a"])]) },
+                { loop.clock += 20_000L; errors.status(529) },
+                msg("end_turn", [text("Done.")])])
+        RoleResult r = run(author().copy(wallClockMs: 120_000L), gateway, loop)
+        assertEquals("DONE", r.outcome)
+        assertEquals([120_000L, 90_000L, 69_500L], gateway.timeouts*.toMillis(),
+                "the whole 120 s, then what is left after 30 s, then after a 20 s failure and its 0.5 s backoff")
+    }
+
+    @Test
+    void "no retry starts when too little would be left after the wait"() {
+        def loop = new CountingLoop(clock: 1_000_000L)
+        def gateway = new ScriptedGateway([{ loop.clock += 15_000L; errors.status(529) }, msg("end_turn", [text("never sent")])])
+        assertEquals("UNAVAILABLE", run(investigator().copy(wallClockMs: 20_000L), gateway, loop).outcome)
+        assertEquals(1, gateway.sent.size(), "5 s left minus the backoff is under the 5 s minimum")
+        assertEquals([], loop.pauses)
+
+        def late = new CountingLoop(clock: 1_000_000L)
+        def busy = new ScriptedGateway([errors.status(429, ["retry-after": "30"]), msg("end_turn", [text("never sent")])])
+        assertEquals("UNAVAILABLE", run(investigator().copy(wallClockMs: 20_000L), busy, late).outcome)
+        assertEquals(1, busy.sent.size(), "a Retry-After past the deadline is not waited for")
+
+        def none = new CountingLoop(clock: 1_000_000L)
+        def unsent = new ScriptedGateway([msg("end_turn", [text("never sent")])])
+        assertEquals("BUDGET", run(investigator().copy(wallClockMs: AgentRoleLoop.MIN_REQUEST_TIMEOUT_MS - 1), unsent, none).outcome)
+        assertEquals(0, unsent.sent.size(), "with under 5 s left no request starts")
     }
 
     @Test

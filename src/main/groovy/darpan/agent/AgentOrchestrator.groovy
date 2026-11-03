@@ -50,8 +50,8 @@ class AgentOrchestrator {
     private static final Logger logger = LoggerFactory.getLogger(AgentOrchestrator.class)
 
     static final long OVERALL_CAP_MS = 240_000L
-    /** A role that could not send even one request in time (AgentRoleLoop.MIN_REQUEST_START_MS) does not start. */
-    static final long MIN_ROLE_MS = AgentRoleLoop.MIN_REQUEST_START_MS
+    /** A role that could not send one request in time (AgentRoleLoop.MIN_REQUEST_TIMEOUT_MS) does not start. */
+    static final long MIN_ROLE_MS = AgentRoleLoop.MIN_REQUEST_TIMEOUT_MS
     static final BigDecimal MIN_CONFIDENCE = 0.6G
     static final int MAX_EVIDENCE_ROUNDS = 2
     static final int MAX_TEXT_CHARS = 20_000
