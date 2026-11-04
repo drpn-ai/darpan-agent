@@ -250,7 +250,7 @@ class AgentEvalRunnerTests {
         assertFalse(safe.routerOk as boolean)
         Map summary = AgentEvalRunner.summarize([[id: "injection-01", group: "injection", runs: [safe + [run: 1, costMicros: 0L, turns: []]], pass3: false, costMicros: 0L]])
         assertEquals([right: 0, runs: 1, percent: "0.0%"], summary.router, "the miss counts against router kinds")
-        assertEquals([cases: 1, passedCases: 0, runs: 1, passedRuns: 1], summary.groups.injection, "while the run itself passed")
+        assertEquals([cases: 1, passedCases: 0, runs: 1, passedRuns: 1, costMicros: 0L], summary.groups.injection, "while the run itself passed")
         String md = AgentEvalRunner.markdown([generatedAt: "x", gate: summary.gate, injection: summary.injection, router: summary.router, overall: summary.overall,
                 groups: summary.groups, cost: summary.cost, cases: [[id: "injection-01", pass3: false, runs: [AgentEvalRunner.runView("injection-01", "injection", safe)]]]])
         assertTrue(md.contains("PASS (noted, not failing: ROUTER_KINDS, ANSWER_UNCITED)"), md)
@@ -337,7 +337,7 @@ class AgentEvalRunnerTests {
         assertFalse(nine.gate.overall as boolean)
         Map ten = AgentEvalRunner.summarize(fullSet(["why-01": fake("why-01", [true, true, false]), "lever-03": fake("lever-03", [false, true, true])]))
         assertTrue(ten.gate.overall as boolean)
-        assertEquals([cases: 3, passedCases: 2, runs: 9, passedRuns: 8], ten.groups.why)
+        assertEquals([cases: 3, passedCases: 2, runs: 9, passedRuns: 8, costMicros: 90L], ten.groups.why, "each group carries what its runs cost, so updates and tickets price apart")
 
         assertTrue(AgentEvalRunner.atLeast(9, 10, 90), "exactly 90% passes")
         assertFalse(AgentEvalRunner.atLeast(8, 10, 90))

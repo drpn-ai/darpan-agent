@@ -188,8 +188,11 @@ class AgentOrchestrator {
         Map out = finish(turn)
         try {
             turn.transcript.write("ASSISTANT", null, [role: "REPLY", text: out.reply, question: out.question])
-            turn.transcript.write("OPERATOR", null, [outcome: out.outcome, proposalIds: ((List<Map>) out.proposals)*.proposalId,
-                    ticketIds: ((List<Map>) out.tickets)*.ticketId, masked: turn.masked])
+            Map operator = [outcome: out.outcome, proposalIds: ((List<Map>) out.proposals)*.proposalId,
+                            ticketIds: ((List<Map>) out.tickets)*.ticketId, masked: turn.masked]
+            // The turn's typed facts and the finding they were found for, so a correction that follows can reuse them.
+            if (turn.facts != null) operator.putAll([findingId: turn.findingId, facts: turn.facts])
+            turn.transcript.write("OPERATOR", null, operator)
         } catch (Exception e) {
             // What the turn made is already committed: the person still gets the reply and its proposal and ticket ids.
             logger.error("Agent reply in conversation ${turn.conversationId} could not be stored".toString(), e)
@@ -244,9 +247,16 @@ class AgentOrchestrator {
         boolean brain = items.any { it.kind in BRAIN_KINDS }
         boolean answer = items.any { it.kind in ANSWER_KINDS }
         Map evidence = [facts: []]
-        if (brain || answer) {
+        // A turn of corrections only, on the finding the last facts were found for, reuses them: the investigator would
+        // re-read the same records. The author can still ask for more (request_more_evidence).
+        List<Map> carried = items.every { it.kind == "CORRECTION" } ? turn.transcript.lastFacts(turn.findingId) : null
+        if (carried) {
+            evidence = [facts: carried, carried: true]
+            turn.facts = carried
+        } else if (brain || answer) {
             Map found = investigate(turn, items, null, [])
             evidence = [facts: found.facts]
+            turn.facts = (List<Map>) found.facts
             if (answer && found.answer) turn.replyParts << (found.answer as String)
             // With brain items the author goes on with what was found; it can ask for more evidence itself.
             if (found.stopped && !brain) { turn.outcome = "INCOMPLETE"; turn.replyParts << stoppedReply(found.stopped as String); return }
@@ -396,6 +406,7 @@ class AgentOrchestrator {
             } else {
                 Map found = investigate(turn, items, ((Map) r.control.input).need as String, (List<Map>) (evidence?.facts ?: []))
                 evidence = [facts: found.facts]
+                turn.facts = (List<Map>) found.facts
                 content = JsonOutput.toJson([facts: found.facts])
                 if (found.stopped) { content = "PARTIAL (${found.stopped}): ".toString() + content; isError = true }
             }
@@ -420,6 +431,8 @@ class AgentOrchestrator {
         b << "\nItems of this turn (index from 0): " << JsonOutput.toJson(itemsView(items)) << "\n"
         if (evidence != null) {
             b << "Evidence (typed facts; source says where each value came from): " << JsonOutput.toJson([facts: evidence.facts]) << "\n"
+            if (evidence.carried) b << "These facts are from this conversation's earlier investigation of the same finding; nothing was re-read " <<
+                    "for this correction. Call request_more_evidence if it needs a record they do not cover.\n"
             List<Map> open = turn.transcript.conversationProposals()
             if (open) b << "Proposals already in this conversation: " << JsonOutput.toJson(open) << "\n"
         } else {
@@ -659,6 +672,22 @@ class AgentOrchestrator {
             return q.text ? [text: q.text as String, from: q.from as String] : null
         }
 
+        /**
+         * The typed facts the conversation's latest investigated turn ended with, when that turn was about this finding;
+         * null otherwise (facts about another finding are not this one's). Typed again on the way out (typedEvidence), so
+         * a stored row never reaches the author unfiltered.
+         */
+        List<Map> lastFacts(String findingId) {
+            for (def msg : rows().condition("kind", "OPERATOR").orderBy(NEWEST_FIRST).limit(AgentOrchestrator.EARLIER_TURNS).list()) {
+                Object parsed = AgentOrchestrator.parseJson(msg.contentJson as String)
+                if (!(parsed instanceof Map) || !(((Map) parsed).facts instanceof List)) continue
+                if (((Map) parsed).findingId != findingId) return null
+                List<Map> facts = (List<Map>) AgentOrchestrator.typedEvidence([facts: ((Map) parsed).facts])?.facts
+                return facts ?: null
+            }
+            return null
+        }
+
         /** The ids of the conversation's proposals and tickets, [proposals, tickets]. */
         Map<String, List<String>> madeIds() {
             List<String> proposals = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.agent.AuditChangeProposal", AgentOrchestrator.WHY)
@@ -737,6 +766,8 @@ class AgentOrchestrator {
         Map<String, Map> tickets = new LinkedHashMap<>()
         /** The conversation's proposal and ticket ids before this turn's roles ran. */
         Map<String, List<String>> priorIds = [proposals: [], tickets: []]
+        /** The typed facts the turn ended with, or null when it investigated nothing. */
+        List<Map> facts
         List<String> replyParts = []
         Map question
         String outcome

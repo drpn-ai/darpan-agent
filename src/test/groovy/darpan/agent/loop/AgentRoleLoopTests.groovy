@@ -439,7 +439,7 @@ class AgentRoleLoopTests {
 
     @Test
     void "usage is priced and recorded per request"() {
-        Map usage = [input_tokens: 1000, output_tokens: 200, cache_read_input_tokens: 5000]
+        Map usage = [input_tokens: 1000, output_tokens: 200, cache_read_input_tokens: 5000, cache_creation_input_tokens: 400]
         def gateway = new ScriptedGateway([
                 msg("tool_use", [toolUse("tu_1", "search_knowledge", [words: "a"])], usage),
                 msg("end_turn", [text("ok")], usage)])
@@ -448,22 +448,23 @@ class AgentRoleLoopTests {
         assertEquals("DONE", r.outcome)
         def row = ec.entity.find("darpan.agent.AgentTurn").condition("turnId", turnId).useCache(false).one()
         assertEquals(2L, row.requestCount as long)
-        assertEquals(2000L, row.inputTokens as long)
+        assertEquals(2000L, row.inputTokens as long, "uncached input only")
+        assertEquals(800L, row.cacheWriteTokens as long, "cache writes in their own column, so a hit rate can be read off the rows")
         assertEquals(400L, row.outputTokens as long)
         assertEquals(10000L, row.cacheReadTokens as long)
-        // sonnet-5-5 2/10/0.20 per MTok: 1000*2 + 200*10 + 5000*0.20 = 5000 micro-dollars a request
-        assertEquals(10000L, row.costMicros as long)
+        // sonnet-5-5 2/10/0.20 per MTok, writes 1.25 x input: 1000*2 + 400*2.5 + 200*10 + 5000*0.20 = 6000 micro-dollars a request
+        assertEquals(12000L, row.costMicros as long)
         assertEquals("end_turn", row.stopReason)
         assertEquals("DONE", row.outcome)
         assertNotNull(row.endedDate)
         assertEquals(MINE, row.companyUserGroupId)
-        assertEquals(10000L, AgentUsageLedger.todayCostMicros(ec, MINE))
+        assertEquals(12000L, AgentUsageLedger.todayCostMicros(ec, MINE))
         assertEquals(0L, AgentUsageLedger.todayCostMicros(ec, OTHER))
 
         Usage u = MAPPER.readValue(JsonOutput.toJson(usage), Usage)
-        assertEquals(9000L, AgentUsageLedger.costMicros("claude-opus-5-5", u))
-        assertEquals(5000L, AgentUsageLedger.costMicros("claude-sonnet-5-5", u))
-        assertEquals(250L, AgentUsageLedger.costMicros("claude-haiku-5-5", u))
+        assertEquals(11000L, AgentUsageLedger.costMicros("claude-opus-5-5", u))
+        assertEquals(6000L, AgentUsageLedger.costMicros("claude-sonnet-5-5", u))
+        assertEquals(300L, AgentUsageLedger.costMicros("claude-haiku-5-5", u))
     }
 
     @Test
@@ -481,8 +482,10 @@ class AgentRoleLoopTests {
         List<Map> tools = (List<Map>) w.tools
         assertEquals(tools*.name.sort(false), tools*.name, "tools sorted by name")
         assertEquals(RoleSpec.author().tools.sort(false), tools*.name)
-        assertEquals([[type: "ephemeral"]], tools.findAll { it.cache_control }*.cache_control)
-        assertNotNull(tools.last().cache_control, "the cache breakpoint is on the last tool")
+        // Tools render before system, so the system prompt's marker caches both; a marker on the last tool only spent one
+        // of the four breakpoint slots.
+        assertEquals([], tools.findAll { it.cache_control }, "no tool carries a cache marker")
+        assertEquals([type: "ephemeral"], w.cache_control, "a role that sends more than one request caches its growing tail (automatic caching)")
         tools.each { Map t ->
             assertEquals(true, t.strict, t.name as String)
             assertEquals(false, t.input_schema.additionalProperties, t.name as String)
@@ -508,6 +511,7 @@ class AgentRoleLoopTests {
         assertNull(w.tools)
         assertEquals("low", w.output_config.effort)
         assertEquals([type: "json_schema", schema: schema], w.output_config.format)
+        assertNull(w.cache_control, "one request: a cached tail would be written at 1.25 x and never read")
         assertFalse(gateway.sent[0]._additionalBodyProperties().containsKey("fallbacks"))
         assertEquals([], gateway.sent[0]._additionalHeaders().values("anthropic-beta"))
     }

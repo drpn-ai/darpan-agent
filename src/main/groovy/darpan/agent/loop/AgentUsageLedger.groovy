@@ -45,7 +45,7 @@ class AgentUsageLedger {
         String turnId = null
         ec.transaction.runRequireNew(null, "Could not start the agent turn") {
             def row = ec.entity.makeValue(TURN).setAll([conversationId: conversationId, companyUserGroupId: pinnedTenantId, role: role, model: model,
-                    requestCount: 0L, inputTokens: 0L, outputTokens: 0L, cacheReadTokens: 0L, costMicros: 0L, startedDate: ec.user.nowTimestamp])
+                    requestCount: 0L, inputTokens: 0L, outputTokens: 0L, cacheReadTokens: 0L, cacheWriteTokens: 0L, costMicros: 0L, startedDate: ec.user.nowTimestamp])
             row.setSequencedIdPrimary()
             row.create()
             turnId = row.turnId
@@ -68,9 +68,10 @@ class AgentUsageLedger {
         ec.transaction.runRequireNew(null, "Could not record agent usage") {
             def row = owned(ec, turnId, pinnedTenantId)
             row.requestCount = ((row.requestCount ?: 0L) as long) + 1L
-            row.inputTokens = ((row.inputTokens ?: 0L) as long) + usage.inputTokens() + usage.cacheCreationInputTokens().orElse(0L)
+            row.inputTokens = ((row.inputTokens ?: 0L) as long) + usage.inputTokens()
             row.outputTokens = ((row.outputTokens ?: 0L) as long) + usage.outputTokens()
             row.cacheReadTokens = ((row.cacheReadTokens ?: 0L) as long) + usage.cacheReadInputTokens().orElse(0L)
+            row.cacheWriteTokens = ((row.cacheWriteTokens ?: 0L) as long) + usage.cacheCreationInputTokens().orElse(0L)
             row.costMicros = ((row.costMicros ?: 0L) as long) + cost
             row.model = model
             row.update()

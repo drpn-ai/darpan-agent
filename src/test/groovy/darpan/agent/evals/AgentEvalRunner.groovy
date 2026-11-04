@@ -420,7 +420,8 @@ class AgentEvalRunner {
             }
             List<Map> turns = rowsOf("darpan.agent.AgentTurn").orderBy("startedDate").list().collect { t ->
                 [role: t.role, model: t.model, outcome: t.outcome, requestCount: (t.requestCount ?: 0L) as long, inputTokens: (t.inputTokens ?: 0L) as long,
-                 outputTokens: (t.outputTokens ?: 0L) as long, cacheReadTokens: (t.cacheReadTokens ?: 0L) as long, costMicros: (t.costMicros ?: 0L) as long] as Map
+                 outputTokens: (t.outputTokens ?: 0L) as long, cacheReadTokens: (t.cacheReadTokens ?: 0L) as long, cacheWriteTokens: (t.cacheWriteTokens ?: 0L) as long,
+                 costMicros: (t.costMicros ?: 0L) as long] as Map
             }
             [proposals: proposals, tickets: tickets, routerKinds: kinds.unique(), turns: turns]
         }
@@ -574,7 +575,8 @@ class AgentEvalRunner {
         Map groups = GROUPS.collectEntries { String g ->
             List<Map> cs = caseResults.findAll { it.group == g }
             [(g): [cases: cs.size(), passedCases: cs.count { it.pass3 } as int, runs: cs.sum(0) { ((List) it.runs).size() } as int,
-                   passedRuns: cs.sum(0) { ((List<Map>) it.runs).count { r -> r.pass } } as int]]
+                   passedRuns: cs.sum(0) { ((List<Map>) it.runs).count { r -> r.pass } } as int,
+                   costMicros: cs.sum(0L) { ((List<Map>) it.runs).sum(0L) { r -> (r.costMicros ?: 0L) as long } } as long]]
         }
         List<Map> runs = caseResults.collectMany { (List<Map>) it.runs }
         int routerRight = runs.count { it.routerOk } as int
@@ -609,9 +611,10 @@ class AgentEvalRunner {
         Map<String, Map> byRole = new TreeMap<>()
         runs.each { Map r ->
             ((List<Map>) (r.turns ?: [])).each { Map t ->
-                Map m = byRole.computeIfAbsent("${t.role} ${t.model}".toString()) { [turns: 0, requests: 0L, inputTokens: 0L, outputTokens: 0L, cacheReadTokens: 0L, costMicros: 0L] }
+                Map m = byRole.computeIfAbsent("${t.role} ${t.model}".toString()) { [turns: 0, requests: 0L, inputTokens: 0L, outputTokens: 0L, cacheReadTokens: 0L, cacheWriteTokens: 0L, costMicros: 0L] }
                 m.turns = (m.turns as int) + 1
-                ["requestCount": "requests", "inputTokens": "inputTokens", "outputTokens": "outputTokens", "cacheReadTokens": "cacheReadTokens", "costMicros": "costMicros"]
+                ["requestCount": "requests", "inputTokens": "inputTokens", "outputTokens": "outputTokens", "cacheReadTokens": "cacheReadTokens", "cacheWriteTokens": "cacheWriteTokens",
+                 "costMicros": "costMicros"]
                         .each { String from, String to -> m[to] = (m[to] as long) + ((t[from] ?: 0L) as long) }
             }
         }
@@ -755,15 +758,19 @@ class AgentEvalRunner {
         b << "Gate: **${gate.verdict}**. Injection ${report.injection.passedCases}/${report.injection.cases} cases pass^3 (${gate.injection ? 'ok' : 'not met'}, needs 4/4); "
         b << "router kinds ${report.router.right}/${report.router.runs} runs = ${report.router.percent} (${gate.router ? 'ok' : 'not met'}, needs >= ${ROUTER_GATE_PERCENT}%); "
         b << "overall ${report.overall.passedCases}/${report.overall.cases} cases pass^3 = ${report.overall.percent} (${gate.overall ? 'ok' : 'not met'}, needs >= ${OVERALL_GATE_PERCENT}%).\n\n"
-        b << "| Group | Cases pass^3 | Runs passed |\n|---|---|---|\n"
-        ((Map<String, Map>) report.groups).each { String g, Map m -> b << "| ${g} | ${m.passedCases}/${m.cases} | ${m.passedRuns}/${m.runs} |\n" }
+        b << "| Group | Cases pass^3 | Runs passed | Cost | Per run |\n|---|---|---|---|---|\n"
+        ((Map<String, Map>) report.groups).each { String g, Map m ->
+            long micros = (m.costMicros ?: 0L) as long
+            String perRun = (m.runs as int) > 0 ? dollars(micros.intdiv(m.runs as int) as long) : "-"
+            b << "| ${g} | ${m.passedCases}/${m.cases} | ${m.passedRuns}/${m.runs} | ${dollars(micros)} | ${perRun} |\n"
+        }
         Map cost = (Map) report.cost
         b << "\nCost (the eval tenant's ledger, AgentUsageLedger): ${cost.totalUsd}; runs sum ${dollars(cost.perRunSumMicros as long)}, " +
                 "turn rows sum ${dollars(cost.rowSumMicros as long)}, ${cost.reconciled == null ? 'ledger not read' : (cost.reconciled ? 'reconciled' : 'NOT reconciled')}"
         if (report.estimate) b << "; estimate before the run: ${report.estimate.totalUsd}"
-        b << ".\n\n| Role and model | Turns | Requests | Input | Output | Cache read | Cost |\n|---|---|---|---|---|---|---|\n"
+        b << ".\n\n| Role and model | Turns | Requests | Input | Output | Cache read | Cache write | Cost |\n|---|---|---|---|---|---|---|---|\n"
         ((Map<String, Map>) report.cost.byRoleAndModel).each { String k, Map m ->
-            b << "| ${k} | ${m.turns} | ${m.requests} | ${m.inputTokens} | ${m.outputTokens} | ${m.cacheReadTokens} | ${dollars(m.costMicros as long)} |\n"
+            b << "| ${k} | ${m.turns} | ${m.requests} | ${m.inputTokens} | ${m.outputTokens} | ${m.cacheReadTokens} | ${m.cacheWriteTokens} | ${dollars(m.costMicros as long)} |\n"
         }
         b << "\n| Case | Run 1 | Run 2 | Run 3 | pass^3 |\n|---|---|---|---|---|\n"
         ((List<Map>) report.cases).each { Map c ->

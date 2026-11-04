@@ -47,13 +47,15 @@ class AgentToolExecutor {
 
     static String serviceOf(String toolName) { return TOOLS[toolName]?.service as String }
 
-    /** The SDK tool definitions for these names, sorted by name, strict, with the cache breakpoint on the last one. */
+    /**
+     * The SDK tool definitions for these names, sorted by name, strict. No cache marker: tools render before the system
+     * prompt, whose marker caches both (AgentRoleLoop.buildParams).
+     */
     static List<Tool> toolDefinitions(List<String> names) {
-        List<String> sorted = names.toSorted()
-        return sorted.withIndex().collect { String name, int i ->
+        return names.toSorted().collect { String name ->
             Tool t = DEFINITIONS[name]
             if (t == null) throw new IllegalArgumentException("Unknown tool ${name}".toString())
-            i == sorted.size() - 1 ? t.toBuilder().cacheControl(com.anthropic.models.messages.CacheControlEphemeral.builder().build()).build() : t
+            t
         }
     }
 

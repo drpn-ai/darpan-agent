@@ -542,6 +542,58 @@ class AgentOrchestratorTests {
     }
 
     @Test
+    void "a correction on the same finding reuses the last turn's facts and skips the investigator"() {
+        String words = "CM-2002 is a test memo; leave it out of the open memo check."
+        def g = new AgentRoleLoopTests.ScriptedGateway([
+                router([item("CAUSE_FEEDBACK", words)]),
+                evidence([fact("savedRunId", runId, "CONFIG"), fact("fileSide", "FILE_1", "CONFIG"), fact("recordKey", "CM-2002", "HUMAN")]),
+                authorSays([toolUse("tu_1", "propose_change", exclusionFor("CM-2002"))]),
+                authorEnds("Drafted an exclusion of CM-2002."),
+                router([item("CORRECTION", "also leave CM-2003 out")]),
+                authorEnds("Noted CM-2003."),
+                router([item("CORRECTION", "and CM-2004")]),
+                authorEnds("Noted CM-2004.")])
+        def o = new AgentOrchestrator(g, AVAILABLE)
+        String conversation = send(o, words).conversationId as String
+        assertEquals("DONE", send(o, "Also leave CM-2003 out.", FINDING, conversation).outcome)
+        assertEquals("DONE", send(o, "And CM-2004.", FINDING, conversation).outcome)
+
+        assertEquals(["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5-5", "claude-haiku-5-5", "claude-opus-5-5",
+                      "claude-haiku-5-5", "claude-opus-5-5"], g.sent.collect { wire(it).model }, "corrections run no investigator")
+        [5, 7].each { int i ->
+            String authorJson = sentJson(g, i)
+            assertTrue(authorJson.contains(runId) && authorJson.contains("FILE_1"), "the first turn's typed facts reach the author (request ${i})")
+            assertTrue(authorJson.contains("earlier investigation"), "the author is told the facts were not re-read (request ${i})")
+        }
+    }
+
+    @Test
+    void "a follow-up on another finding or of another kind investigates again"() {
+        asSystem {
+            upsert("darpan.audit.AuditFinding", [findingId: "F-90003", companyUserGroupId: MINE, statementId: "AGO_R1", checkId: "AGO_CHK",
+                    recordKey: "CM-1003", period: "2026-10", stateEnumId: "AUDFS_OPEN", headline: "Memo CM-1003 is open",
+                    firstFoundDate: Date.valueOf("2026-10-08"), lastSeenDate: Date.valueOf("2026-10-08")])
+        }
+        String words = "CM-2002 is a test memo; leave it out."
+        def g = new AgentRoleLoopTests.ScriptedGateway([
+                router([item("CAUSE_FEEDBACK", words)]),
+                evidence([fact("savedRunId", runId, "CONFIG")]),
+                authorEnds("Noted."),
+                router([item("CORRECTION", "same for this one")]),
+                evidence([fact("savedRunId", runId, "CONFIG")]),
+                authorEnds("Noted."),
+                router([item("CORRECTION", "fix that"), item("RULE_CHANGE", "and change the rule")]),
+                evidence([fact("savedRunId", runId, "CONFIG")]),
+                authorEnds("Noted.")])
+        def o = new AgentOrchestrator(g, AVAILABLE)
+        String conversation = send(o, words).conversationId as String
+        send(o, "Same for this one.", "F-90003", conversation)
+        send(o, "Fix that, and change the rule.", "F-90003", conversation)
+        assertEquals(["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"] * 3, g.sent.collect { wire(it).model },
+                "facts of another finding, or a turn that is not only corrections, are investigated afresh")
+    }
+
+    @Test
     void "a view-only person's proposal stays DRAFT for an editor"() {
         asSystem { setPermission(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID) }
         actAs(MINE)

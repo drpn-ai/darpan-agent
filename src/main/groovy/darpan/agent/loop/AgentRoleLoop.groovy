@@ -233,8 +233,13 @@ class AgentRoleLoop {
     }
 
     /**
-     * One request. The prefix (tools sorted by name, cache breakpoint on the last; the system prompt as one cached text
-     * block; model, thinking and effort) depends only on the spec, so it is byte-identical across turns and caches.
+     * One request. The prefix (tools sorted by name; the system prompt as one text block whose cache marker caches tools and
+     * system together; model, thinking and effort) depends only on the spec, so it is byte-identical across turns and caches.
+     * A role that may send more than one request also turns on automatic caching (top-level cache_control): the API moves
+     * that breakpoint to the end of the conversation, so each tool round reads everything before it from the cache instead
+     * of paying full input for it again. The router sends one request, where a cached tail would be written at 1.25 x input
+     * and never read. Explicit markers stay at most 3 (system, plus the author's brain catalog), so with this one the
+     * request is within the API's 4.
      */
     static MessageCreateParams buildParams(RoleSpec spec, List<MessageParam> messages) {
         MessageCreateParams.Builder b = MessageCreateParams.builder()
@@ -244,6 +249,7 @@ class AgentRoleLoop {
                         .cacheControl(CacheControlEphemeral.builder().build()).build()])
                 .messages(messages)
         if (spec.tools) b.tools(AgentToolExecutor.toolDefinitions(spec.tools).collect { ToolUnion.ofTool(it) })
+        if (spec.maxRequests > 1) b.cacheControl(CacheControlEphemeral.builder().build())
         if (spec.adaptiveThinking()) b.thinking(ThinkingConfigAdaptive.builder().build())
         Map output = [effort: spec.effort.toLowerCase(Locale.ROOT)]
         if (spec.outputSchema != null) output.format = [type: "json_schema", schema: spec.outputSchema]
