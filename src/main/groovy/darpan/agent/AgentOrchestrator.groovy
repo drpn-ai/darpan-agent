@@ -42,7 +42,8 @@ import java.util.regex.Pattern
  * The whole turn is capped at 240 s: each role's wall clock is the smaller of its own and what is left, and a role that
  * would start with less than {@link #MIN_ROLE_MS} left does not start (outcome INCOMPLETE).
  *
- * Outcomes: AGENT_OFF, AGENT_UNAVAILABLE, RATE_LIMITED, OVER_BUDGET (nothing written), DECLINED, QUESTION (from the router,
+ * Outcomes: AGENT_OFF, AGENT_UNAVAILABLE, AI_NOT_GRANTED, AI_EXPIRED, AI_PAUSED (DAR-BE-194: the person has no live grant of
+ * AI access in this tenant; nothing written, or, mid-turn, the next role does not start), RATE_LIMITED, OVER_BUDGET (nothing written), DECLINED, QUESTION (from the router,
  * the author's ask_human, or a proposal blocked by provenance), DONE, INCOMPLETE (a role stopped on a budget, a loop, a
  * refusal or the time cap; what it made is still returned), TENANT_CHANGED, ERROR.
  */
@@ -144,12 +145,15 @@ class AgentOrchestrator {
                 ec.message.addError("Conversation ${conversationId} was not found.".toString()); return null
             }
         }
+        // DAR-BE-194: the person needs a live grant of AI access in this tenant (a Darpan admin gives it); nothing is written otherwise.
+        Map access = AgentAccess.access(ec, pinned, userId)
+        if (access.state != AgentAccess.LIVE) return response(conversationId, accessOutcome(access), accessReply(access))
         if (turnsInLastHour(ec, userId) >= turnsPerHour())
             return response(conversationId, "RATE_LIMITED", "You have sent ${turnsPerHour()} messages to the agent in the last hour; try again later.".toString())
         if (overDailyCap(ec, pinned)) return response(conversationId, "OVER_BUDGET", "The agent's budget for this tenant is spent for today (UTC).")
 
         Map scrubbed = PasteScrubber.scrub(text)
-        Turn turn = new Turn(ec: ec, pinned: pinned, auditId: auditId, auditCode: audit.auditCode as String, findingId: findingId,
+        Turn turn = new Turn(ec: ec, pinned: pinned, userId: userId, grantId: access.grantId as String, auditId: auditId, auditCode: audit.auditCode as String, findingId: findingId,
                 words: scrubbed.text as String, masked: (List<String>) scrubbed.masked, deadline: clock.call() + overallCapMs)
         boolean fresh = conversation == null
         turn.conversationId = fresh ? TenantScopedFinder.mintId(ec, "darpan.agent.AgentConversation", "conversationId") : conversationId
@@ -467,6 +471,10 @@ class AgentOrchestrator {
         long left = turn.deadline - clock.call()
         if (left < MIN_ROLE_MS) throw new Stop("INCOMPLETE", "I ran out of time for this message; ask again for the rest.")
         if (overDailyCap(turn.ec, turn.pinned)) throw new Stop("OVER_BUDGET", "The agent's budget for this tenant is spent for today (UTC).")
+        // The grant is read again before every role: one that reached its limit, was paused or revoked mid-turn stops the next role.
+        Map access = AgentAccess.access(turn.ec, turn.pinned, turn.userId)
+        if (access.state != AgentAccess.LIVE) throw new Stop(accessOutcome(access), accessReply(access))
+        turn.grantId = access.grantId as String
         // The switch is read again before every role: turned off mid-turn, the next role does not start.
         String state = availability.call(turn.ec)
         if (state != AgentSwitch.ON) throw new Stop(state ?: AgentSwitch.AGENT_OFF, state == AgentSwitch.AGENT_UNAVAILABLE ?
@@ -474,7 +482,7 @@ class AgentOrchestrator {
         RoleSpec spec = left < base.wallClockMs ? base.copy(wallClockMs: left) : base
         String turnId
         try {
-            turnId = AgentUsageLedger.startTurn(turn.ec, turn.pinned, turn.conversationId, spec.role, spec.model)
+            turnId = AgentUsageLedger.startTurn(turn.ec, turn.pinned, turn.conversationId, spec.role, spec.model, turn.userId, turn.grantId)
         } catch (TenantChangedException ignored) {
             throw new Stop("TENANT_CHANGED", null)
         }
@@ -560,6 +568,28 @@ class AgentOrchestrator {
     }
 
     // ---------------------------------------------------------------- limits
+
+    /** The outcome of a turn refused for its grant (AgentAccess state NOT_GRANTED, EXPIRED or PAUSED). */
+    static String accessOutcome(Map access) {
+        switch (access.state) {
+            case AgentAccess.EXPIRED: return "AI_EXPIRED"
+            case AgentAccess.PAUSED: return "AI_PAUSED"
+            default: return "AI_NOT_GRANTED"
+        }
+    }
+
+    /** What the person reads when their grant does not let the turn run; an end date is shown as yyyy-MM-dd (UTC). */
+    static String accessReply(Map access) {
+        switch (access.state) {
+            case AgentAccess.EXPIRED:
+                String day = (access.thruDate as Timestamp).toInstant().atZone(java.time.ZoneOffset.UTC).toLocalDate().toString()
+                return "Your AI access ended on ${day}.".toString()
+            case AgentAccess.PAUSED:
+                return access.pauseReason == AgentAccess.REASON_ADMIN ? "Your AI access is paused; a Darpan admin can lift it." :
+                        "Your AI access is paused at its spending limit; a Darpan admin can lift it."
+            default: return "AI is not on for you in this tenant; a Darpan admin can turn it on."
+        }
+    }
 
     /**
      * Router runs (one per accepted message) the person started in the last hour, in any tenant they may enter: one count
@@ -755,6 +785,9 @@ class AgentOrchestrator {
     static class Turn {
         def ec
         String pinned
+        /** The person and the AI access grant this turn spends against (DAR-BE-194). */
+        String userId
+        String grantId
         String conversationId
         String auditId
         String auditCode

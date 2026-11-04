@@ -56,6 +56,9 @@ class AgentOrchestratorTests {
     static final Closure<String> AVAILABLE = { def e -> AgentAvailability.resolve(AgentSwitch.state(e)) { new Object() } }
 
     private ExecutionContext ec
+    /** DAR-BE-194: the test user's grant in MINE that every test starts with. */
+    private String liveGrantId
+    private static final List<String> GRANT_ENTITIES = ["darpan.agent.AgentAccessGrantEvent", "darpan.agent.AgentAccessGrant"]
     private String runId
     private String previousEnabled
 
@@ -145,11 +148,27 @@ class AgentOrchestratorTests {
     void reset() {
         asSystem {
             AGENT_ENTITIES.each { ec.entity.find(it).deleteAll() }
+            GRANT_ENTITIES.each { ec.entity.find(it).deleteAll() }
             [MINE, OTHER].each { upsert("darpan.auth.TenantSetting", [companyUserGroupId: it, agentEnabled: "Y"]) }
             setPermission(TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID)
         }
+        liveGrantId = grantAi(MINE)
         actAs(MINE)
     }
+
+    /** A grant of AI access to the test user in tenant, live from an hour ago unless extra says otherwise. */
+    private String grantAi(String tenant, Map extra = [:]) {
+        return asSystem {
+            def g = ec.entity.makeValue("darpan.agent.AgentAccessGrant").setAll([userId: USER, companyUserGroupId: tenant,
+                    fromDate: new Timestamp(System.currentTimeMillis() - 3_600_000L), statusId: "ACTIVE"] + extra)
+            g.setSequencedIdPrimary()
+            g.create()
+            return g.grantId as String
+        }
+    }
+
+    private void noGrants() { asSystem { GRANT_ENTITIES.each { ec.entity.find(it).deleteAll() } } }
+
 
     private void actAs(String tenant) {
         assertTrue(ec.user.internalLoginUser(USERNAME), "could not log in")
@@ -614,6 +633,73 @@ class AgentOrchestratorTests {
         send(o, "Fix that, and change the rule.", "F-90003", conversation)
         assertEquals(["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"] * 3, g.sent.collect { wire(it).model },
                 "facts of another finding, or a turn that is not only corrections, are investigated afresh")
+    }
+
+    // ------------------------------------------------------------------ DAR-BE-194: per-user AI access
+
+    @Test
+    void "no grant ends the turn AI_NOT_GRANTED before any model call and writes nothing"() {
+        noGrants()
+        def g = new AgentRoleLoopTests.ScriptedGateway([])
+        Map out = send(new AgentOrchestrator(g, AVAILABLE), "Why is this one open?")
+        assertEquals("AI_NOT_GRANTED", out.outcome)
+        assertEquals("AI is not on for you in this tenant; a Darpan admin can turn it on.", out.reply)
+        assertEquals(0, g.sent.size())
+        ["darpan.agent.AgentConversation", "darpan.agent.AgentTurn", "darpan.agent.AgentMessage"].each { assertEquals(0L, count(it), it) }
+    }
+
+    @Test
+    void "an expired grant ends AI_EXPIRED with its end date, and a paused one AI_PAUSED"() {
+        noGrants()
+        grantAi(MINE, [fromDate: Timestamp.from(java.time.Instant.parse("2026-10-30T18:00:00Z")), thruDate: Timestamp.from(java.time.Instant.parse("2026-10-31T18:00:00Z"))])
+        def g = new AgentRoleLoopTests.ScriptedGateway([])
+        Map expired = send(new AgentOrchestrator(g, AVAILABLE), "Why is this one open?")
+        assertEquals(["AI_EXPIRED", "Your AI access ended on 2026-10-31."], [expired.outcome, expired.reply])
+        noGrants()
+        grantAi(MINE, [statusId: "PAUSED", pauseReason: "COST_LIMIT"])
+        Map limit = send(new AgentOrchestrator(g, AVAILABLE), "Why is this one open?")
+        assertEquals(["AI_PAUSED", "Your AI access is paused at its spending limit; a Darpan admin can lift it."], [limit.outcome, limit.reply])
+        noGrants()
+        grantAi(MINE, [statusId: "PAUSED", pauseReason: "ADMIN"])
+        Map admin = send(new AgentOrchestrator(g, AVAILABLE), "Why is this one open?")
+        assertEquals(["AI_PAUSED", "Your AI access is paused; a Darpan admin can lift it."], [admin.outcome, admin.reply])
+        assertEquals(0, g.sent.size())
+    }
+
+    @Test
+    void "a grant crossed mid-turn stops the next role"() {
+        noGrants()
+        String id = grantAi(MINE, [costCapMicros: 10L])
+        // The router's request costs 15 micro-dollars (Haiku: 50 in x 0.10 + 20 out x 0.50), over the 10 the grant allows.
+        def g = new AgentRoleLoopTests.ScriptedGateway([router([item("EXPLAIN", "Why is this one open?", 0.9, [FINDING])])])
+        Map out = send(new AgentOrchestrator(g, AVAILABLE), "Why is this one open?")
+        assertEquals("AI_PAUSED", out.outcome, out.toString())
+        assertEquals(1, g.sent.size(), "the router ran; the investigator did not")
+        Map row = asSystem { ec.entity.find("darpan.agent.AgentAccessGrant").condition("grantId", id).useCache(false).one().getMap() }
+        assertEquals(["PAUSED", "COST_LIMIT"], [row.statusId, row.pauseReason])
+        List events = asSystem { ec.entity.find("darpan.agent.AgentAccessGrantEvent").condition("grantId", id).useCache(false).list() }
+        assertEquals([["AUTO_PAUSE", "SYSTEM"]], events.collect { [it.action, it.byUserId] })
+    }
+
+    @Test
+    void "every turn row names the user and the grant"() {
+        def g = new AgentRoleLoopTests.ScriptedGateway([
+                router([item("EXPLAIN", "Why is this one open?", 0.9, [FINDING])]),
+                evidence([fact("findingId", FINDING, "TOOL")], "F-90001 is open because memo CM-1001 is still open.")])
+        Map out = send(new AgentOrchestrator(g, AVAILABLE), "Why is this one open?")
+        assertEquals("DONE", out.outcome, out.toString())
+        List turns = asSystem { ec.entity.find("darpan.agent.AgentTurn").useCache(false).list() }
+        assertEquals(2, turns.size())
+        assertTrue(turns.every { it.userId == USER && it.grantId == liveGrantId }, turns.collect { [it.role, it.userId, it.grantId] }.toString())
+    }
+
+    @Test
+    void "a grant in another tenant does not open this one"() {
+        noGrants()
+        grantAi(OTHER)
+        def g = new AgentRoleLoopTests.ScriptedGateway([])
+        assertEquals("AI_NOT_GRANTED", send(new AgentOrchestrator(g, AVAILABLE), "Why is this one open?").outcome)
+        assertEquals(0, g.sent.size())
     }
 
     @Test

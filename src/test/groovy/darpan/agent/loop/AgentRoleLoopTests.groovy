@@ -169,7 +169,7 @@ class AgentRoleLoopTests {
 
     private void upsert(String entityName, Map<String, Object> fields) { ec.entity.makeValue(entityName).setAll(fields).createOrUpdate() }
 
-    private String turn(RoleSpec spec) { AgentUsageLedger.startTurn(ec, MINE, CONV, spec.role, spec.model) }
+    private String turn(RoleSpec spec) { AgentUsageLedger.startTurn(ec, MINE, CONV, spec.role, spec.model, null, null) }
 
     private RoleResult run(RoleSpec spec, ScriptedGateway gateway, CountingLoop loop = new CountingLoop(), List<MessageParam> messages = ask("Why is F-1 open?")) {
         return loop.runRole(ec, spec, MINE, messages, gateway, turn(spec))
@@ -324,7 +324,7 @@ class AgentRoleLoopTests {
         String turnId = turn(investigator())
         actAs(OTHER)
         try {
-            assertThrows(TenantChangedException) { AgentUsageLedger.startTurn(ec, MINE, CONV, "INVESTIGATOR", "claude-sonnet-5-5") }
+            assertThrows(TenantChangedException) { AgentUsageLedger.startTurn(ec, MINE, CONV, "INVESTIGATOR", "claude-sonnet-5-5", null, null) }
             RoleResult r2 = new CountingLoop().runRole(ec, investigator(), MINE, ask("x"), again, turnId)
             assertEquals("TENANT_CHANGED", r2.outcome, "a turn whose tenant is no longer active sends nothing")
             assertEquals(0, again.sent.size())

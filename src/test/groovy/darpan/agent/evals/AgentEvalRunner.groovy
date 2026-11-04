@@ -217,6 +217,9 @@ class AgentEvalRunner {
             upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: tenant, userId: world.user.userId,
                     permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID, fromDate: from])
             upsert("darpan.auth.TenantSetting", [companyUserGroupId: tenant, agentEnabled: "Y", timeZone: world.tenant.timeZone])
+            // DAR-BE-194: the eval user's AI access in the eval tenant; no per-user limit (the eval's budget is the tenant's daily cap).
+            upsert("darpan.agent.AgentAccessGrant", [grantId: "EVAL_GRANT", userId: world.user.userId, companyUserGroupId: tenant,
+                    fromDate: from, statusId: "ACTIVE"])
             upsert("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: source.nsAuthConfigId, companyUserGroupId: tenant, authType: "NONE", isActive: "Y"])
             upsert("darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: source.queryId, nsAuthConfigId: source.nsAuthConfigId,
                     recordType: source.recordType, companyUserGroupId: tenant, isActive: "Y", description: source.description])

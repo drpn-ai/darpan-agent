@@ -34,10 +34,10 @@ class AgentUsageLedger {
     static final BigDecimal CACHE_WRITE_FACTOR = 1.25G
 
     /**
-     * A new AgentTurn for one role run of the pinned tenant; answers its turnId. The pinned tenant must still be the active
-     * one and own the conversation.
+     * A new AgentTurn for one role run of the pinned tenant, naming the person and the AI access grant it spends against
+     * (DAR-BE-194); answers its turnId. The pinned tenant must still be the active one and own the conversation.
      */
-    static String startTurn(def ec, String pinnedTenantId, String conversationId, String role, String model) {
+    static String startTurn(def ec, String pinnedTenantId, String conversationId, String role, String model, String userId, String grantId) {
         if (!pinnedTenantId || TenantAccessSupport.currentActiveTenantUserGroupId(ec) != pinnedTenantId)
             throw new TenantChangedException()
         if (TenantScopedFinder.findOneOwnedByTenant(ec, CONVERSATION, "conversationId", conversationId, pinnedTenantId, WHY) == null)
@@ -45,7 +45,8 @@ class AgentUsageLedger {
         String turnId = null
         ec.transaction.runRequireNew(null, "Could not start the agent turn") {
             def row = ec.entity.makeValue(TURN).setAll([conversationId: conversationId, companyUserGroupId: pinnedTenantId, role: role, model: model,
-                    requestCount: 0L, inputTokens: 0L, outputTokens: 0L, cacheReadTokens: 0L, cacheWriteTokens: 0L, costMicros: 0L, startedDate: ec.user.nowTimestamp])
+                    requestCount: 0L, inputTokens: 0L, outputTokens: 0L, cacheReadTokens: 0L, cacheWriteTokens: 0L, costMicros: 0L, startedDate: ec.user.nowTimestamp,
+                    userId: userId, grantId: grantId])
             row.setSequencedIdPrimary()
             row.create()
             turnId = row.turnId
@@ -75,6 +76,9 @@ class AgentUsageLedger {
             row.costMicros = ((row.costMicros ?: 0L) as long) + cost
             row.model = model
             row.update()
+            // DAR-BE-194: a grant whose spend this request took to its limit pauses here, in the same transaction; the
+            // orchestrator's next role check then ends the turn AI_PAUSED.
+            if (row.grantId) darpan.agent.AgentAccess.pauseIfOverLimit(ec, row.grantId as String)
         }
         return cost
     }

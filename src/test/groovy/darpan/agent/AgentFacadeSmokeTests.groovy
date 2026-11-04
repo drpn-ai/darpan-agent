@@ -76,7 +76,13 @@ class AgentFacadeSmokeTests {
     void reset() {
         asSystem {
             AGENT_ENTITIES.each { ec.entity.find(it).deleteAll() }
+            ["darpan.agent.AgentAccessGrantEvent", "darpan.agent.AgentAccessGrant"].each { ec.entity.find(it).deleteAll() }
             [MINE, OTHER].each { upsert("darpan.auth.TenantSetting", [companyUserGroupId: it, agentEnabled: "Y"]) }
+            // DAR-BE-194: the person has AI access in both tenants (a tab switch mid-turn must still be the one that stops it).
+            [MINE, OTHER].each { String t ->
+                upsert("darpan.agent.AgentAccessGrant", [grantId: "AFS_G_${t}".toString(), userId: USER, companyUserGroupId: t,
+                        fromDate: FROM, statusId: "ACTIVE"])
+            }
         }
     }
 
