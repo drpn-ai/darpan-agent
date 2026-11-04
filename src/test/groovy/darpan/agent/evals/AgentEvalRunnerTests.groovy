@@ -364,7 +364,7 @@ class AgentEvalRunnerTests {
     void "the estimate sends one case to a recording gateway and prices every request it captured"() {
         Map est = runner.estimate(evalCase(AgentEvalRunner.ESTIMATE_CASE), 12, 3)
         List<Map> requests = (List<Map>) est.requests
-        assertEquals(["claude-haiku-5-5", "claude-sonnet-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5-5"], requests*.model,
+        assertEquals(["claude-sonnet-5-5", "claude-sonnet-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5-5"], requests*.model,
                 "router, investigator twice, author twice: every role ran on the dry case")
         requests.each { assertTrue((it.chars as long) > 1000L && (it.costMicros as long) > 0L, it.toString()) }
         assertEquals([2000L, 16000L, 16000L, 32000L, 32000L], requests*.maxTokens)

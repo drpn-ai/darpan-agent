@@ -46,8 +46,13 @@ final class RoleSpec {
         AgentToolExecutor.requireWithinStrictLimits(role, tools, outputSchema)
     }
 
+    /**
+     * Sonnet, not Haiku: the router's kind decides the path (DISPLAY_FEEDBACK goes straight to a ticket), and in three
+     * evals Haiku kept fix-text changes as display and split closing words off however the definitions were worded.
+     * One schema-bound request with no thinking, so it adds about $0.002 a message.
+     */
     static RoleSpec router(Map outputSchema = null) {
-        return new RoleSpec(role: ROUTER, model: "claude-haiku-5-5", effort: "LOW", systemPromptPath: "darpan/agent/prompts/router.md",
+        return new RoleSpec(role: ROUTER, model: "claude-sonnet-5-5", effort: "LOW", systemPromptPath: "darpan/agent/prompts/router.md",
                 tools: [], maxRequests: 1, maxToolCalls: 0, wallClockMs: 20_000L, maxTokens: 2_000L, outputSchema: outputSchema)
     }
 
@@ -75,11 +80,11 @@ final class RoleSpec {
         return new RoleSpec(args)
     }
 
-    /** Sonnet and Opus think adaptively; Haiku (the router, low effort) sends no thinking config. */
-    boolean adaptiveThinking() { return !model.startsWith("claude-haiku") }
+    /** The investigator and author think adaptively; the router (one schema-bound sort) and Haiku send no thinking config. */
+    boolean adaptiveThinking() { return role != ROUTER && !model.startsWith("claude-haiku") }
 
-    /** Server-side refusal fallbacks exist for Opus and Sonnet only. */
-    boolean serverFallbacks() { return model.startsWith("claude-opus") || model.startsWith("claude-sonnet") }
+    /** Server-side refusal fallbacks exist for Opus and Sonnet only; the router's one cheap request never takes one. */
+    boolean serverFallbacks() { return role != ROUTER && (model.startsWith("claude-opus") || model.startsWith("claude-sonnet")) }
 
     @Override
     String toString() { return "RoleSpec(${role}, ${model})" }

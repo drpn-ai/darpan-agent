@@ -577,7 +577,7 @@ class AgentRoleLoopTests {
         RoleResult r = run(RoleSpec.router(schema).copy(systemPromptPath: PROMPT), gateway)
         assertEquals("DONE", r.outcome)
         Map w = wire(gateway.sent[0])
-        assertEquals("claude-haiku-5-5", w.model)
+        assertEquals("claude-sonnet-5-5", w.model)
         assertNull(w.thinking)
         assertNull(w.tools)
         assertEquals("low", w.output_config.effort)

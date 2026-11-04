@@ -31,7 +31,7 @@ import java.util.regex.Pattern
  *            20 turns an hour per person; the tenant's daily dollar cap
  *   pin      the active tenant, once; every row this turn writes carries it, whatever another tab does
  *   scrub    keys, secrets, emails and phones out of the text (PasteScrubber) before it is stored or sent
- *   ROUTER   Haiku, no tools, never record data: items[] {kind, span, refs, confidence}, or one question
+ *   ROUTER   Sonnet, no thinking, no tools, never record data: items[] {kind, span, refs, confidence}, or one question
  *   OTHER    a fixed decline; no other model call
  *   INVESTIGATOR  Sonnet, read tools: typed Evidence (each value tagged HUMAN, CONFIG or TOOL) plus an answer for EXPLAIN
  *   AUTHOR   Opus: propose_* (one tool per proposal kind) / raise_ticket / ask_human / request_more_evidence (at most 2 rounds). It reads the verbatim

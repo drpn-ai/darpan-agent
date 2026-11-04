@@ -708,12 +708,15 @@ class AgentEvalRunner {
             requests << [model: model, chars: MAPPER.writeValueAsString(params._body()).length(), maxTokens: params.maxTokens()]
             boolean first = params.messages().size() == 1
             String finding = evalCase.openFindingId as String
-            if (model.startsWith("claude-haiku")) {
+            // The role is read from what the request carries, not its model: the router sends no tools, the investigator
+            // reads (get_finding), the author drafts.
+            List<String> tools = params.tools().orElse([]).collect { it.isTool() ? it.asTool().name() : "" }
+            if (tools.isEmpty()) {
                 String kind = ((List) ((Map) evalCase.expect).routerKinds)[0] as String
                 return message(model, "end_turn", [[type: "text", text: JsonOutput.toJson([items: [[kind: kind, span: evalCase.userText,
                         refs: [findingIds: finding ? [finding] : [], orderKeys: [], statementCodes: []], confidence: 0.95]], question: ""])]])
             }
-            if (model.startsWith("claude-sonnet")) {
+            if ("get_finding" in tools) {
                 if (first) return message(model, "tool_use", [finding ? toolUse("get_finding", [findingId: finding]) : toolUse("get_audit_settings", [audit: auditCode])])
                 return message(model, "end_turn", [[type: "text", text: JsonOutput.toJson([facts: [[item: 0, field: "findingId", value: finding ?: "none", source: "TOOL"]],
                         answer: ""])]])

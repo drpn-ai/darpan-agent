@@ -226,7 +226,7 @@ class AgentOrchestratorTests {
         assertEquals("DONE", out.outcome, out.toString())
         assertTrue((out.reply as String).contains(FINDING), out.reply as String)
         assertEquals(3, g.sent.size(), "router, then two investigator requests; no author")
-        assertEquals(["claude-haiku-5-5", "claude-sonnet-5-5", "claude-sonnet-5-5"], g.sent.collect { wire(it).model })
+        assertEquals(["claude-sonnet-5-5", "claude-sonnet-5-5", "claude-sonnet-5-5"], g.sent.collect { wire(it).model })
         Map routerWire = wire(g.sent[0])
         assertNull(routerWire.tools, "the router has no tools")
         assertTrue(sentJson(g, 0).contains("Open finding: ${FINDING}"), "the router sees the open finding id")
@@ -542,7 +542,7 @@ class AgentOrchestratorTests {
                 authorEnds("Noted.")])
         Map out = send(new AgentOrchestrator(g, AVAILABLE), words)
         assertEquals("DONE", out.outcome, out.toString())
-        assertEquals(["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"], g.sent.collect { wire(it).model })
+        assertEquals(["claude-sonnet-5-5", "claude-sonnet-5-5", "claude-opus-5-5"], g.sent.collect { wire(it).model })
 
         def asks = new AgentRoleLoopTests.ScriptedGateway([router([item("RULE_CHANGE", words, 0.55, [FINDING])], "Leave it out of which check?")])
         Map asked = send(new AgentOrchestrator(asks, AVAILABLE), words)
@@ -600,8 +600,8 @@ class AgentOrchestratorTests {
         assertEquals("DONE", send(o, "Also leave CM-2003 out.", FINDING, conversation).outcome)
         assertEquals("DONE", send(o, "And CM-2004.", FINDING, conversation).outcome)
 
-        assertEquals(["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5-5", "claude-haiku-5-5", "claude-opus-5-5",
-                      "claude-haiku-5-5", "claude-opus-5-5"], g.sent.collect { wire(it).model }, "corrections run no investigator")
+        assertEquals(["claude-sonnet-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5-5", "claude-sonnet-5-5", "claude-opus-5-5",
+                      "claude-sonnet-5-5", "claude-opus-5-5"], g.sent.collect { wire(it).model }, "corrections run no investigator")
         [5, 7].each { int i ->
             String authorJson = sentJson(g, i)
             assertTrue(authorJson.contains(runId) && authorJson.contains("FILE_1"), "the first turn's typed facts reach the author (request ${i})")
@@ -631,7 +631,7 @@ class AgentOrchestratorTests {
         String conversation = send(o, words).conversationId as String
         send(o, "Same for this one.", "F-90003", conversation)
         send(o, "Fix that, and change the rule.", "F-90003", conversation)
-        assertEquals(["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"] * 3, g.sent.collect { wire(it).model },
+        assertEquals(["claude-sonnet-5-5", "claude-sonnet-5-5", "claude-opus-5-5"] * 3, g.sent.collect { wire(it).model },
                 "facts of another finding, or a turn that is not only corrections, are investigated afresh")
     }
 
@@ -742,7 +742,7 @@ class AgentOrchestratorTests {
                 authorSays([toolUse("tu_1", "raise_ticket", [category: "DISPLAY", verbatimText: words])]),
                 authorEnds("I raised a display ticket.")])
         Map out = send(new AgentOrchestrator(g, AVAILABLE), words)
-        assertEquals(["claude-haiku-5-5", "claude-opus-5-5", "claude-opus-5-5"], g.sent.collect { wire(it).model }, "router then author; no investigator")
+        assertEquals(["claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5-5"], g.sent.collect { wire(it).model }, "router then author; no investigator")
         assertEquals(["raise_ticket"], ((List<Map>) wire(g.sent[1]).tools)*.name)
         List<Map> blocks = (List<Map>) ((Map) ((List) wire(g.sent[1]).messages)[0]).content
         assertEquals(1, blocks.size(), "a ticket-only author gets no catalog block")
