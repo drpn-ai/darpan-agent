@@ -490,6 +490,12 @@ class AgentOrchestrator {
         record(turn, spec, r, turnId)
         if (r.outcome == "TENANT_CHANGED") throw new Stop("TENANT_CHANGED", null)
         if (r.outcome == "UNAVAILABLE") throw new Stop(AgentSwitch.AGENT_UNAVAILABLE, "The agent cannot reach Claude right now; try again later.")
+        if (r.outcome == "NO_ACCESS") {
+            // The grant reached its limit (or was paused, revoked or expired) mid-role: the role stopped before its next request.
+            Map now = AgentAccess.access(turn.ec, turn.pinned, turn.userId)
+            if (now.state != AgentAccess.LIVE) throw new Stop(accessOutcome(now), accessReply(now))
+            throw new Stop("INCOMPLETE", stoppedReply("NO_ACCESS"))
+        }
         return r
     }
 

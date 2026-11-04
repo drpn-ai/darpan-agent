@@ -37,7 +37,8 @@ import java.util.concurrent.ConcurrentHashMap
  * DAR-BE-159. The Messages API tool loop one role runs: send, append the response whole, run its tool calls as the user,
  * return every result of the round in one user message, and stop on the first of: end_turn (DONE), a control tool
  * (QUESTION, MORE_EVIDENCE), a budget (BUDGET), the same call a third time (LOOP), refusal (REFUSED), max_tokens
- * (MAX_TOKENS), a tenant switch (TENANT_CHANGED), Anthropic unavailable after the SDK's retries (UNAVAILABLE), or a
+ * (MAX_TOKENS), a tenant switch (TENANT_CHANGED), the person's AI access grant no longer live (NO_ACCESS, DAR-BE-194: read
+ * before every request, so a grant that reaches its limit stops the role before its next request), Anthropic unavailable after the SDK's retries (UNAVAILABLE), or a
  * stop reason this code does not know, or a 4xx it caused (ERROR; the 4xx is rethrown after the turn is closed).
  * Every request is priced onto the turn's AgentTurn row, under the pinned tenant.
  *
@@ -139,6 +140,8 @@ class AgentRoleLoop {
             // The cap is enforced before each request: with too little left, none is sent.
             if (result.requestCount >= spec.maxRequests || deadline - now() < MIN_REQUEST_TIMEOUT_MS) return finish(ec, pinnedTenantId, turnId, result, "BUDGET")
             if (!tenantStill(ec, pinnedTenantId)) return finish(ec, pinnedTenantId, turnId, result, "TENANT_CHANGED")
+            if (turn.grantId && darpan.agent.AgentAccess.access(ec, pinnedTenantId, turn.userId as String).state != darpan.agent.AgentAccess.LIVE)
+                return finish(ec, pinnedTenantId, turnId, result, "NO_ACCESS")
 
             Message response
             try {

@@ -682,6 +682,21 @@ class AgentOrchestratorTests {
     }
 
     @Test
+    void "a grant crossed inside a role ends the turn AI_PAUSED before the role's next request"() {
+        noGrants()
+        // Router 15 micro-dollars, then the investigator's first request 400: over the 100 the grant allows mid-role.
+        grantAi(MINE, [costCapMicros: 100L])
+        def g = new AgentRoleLoopTests.ScriptedGateway([
+                router([item("EXPLAIN", "Why is this one open?", 0.9, [FINDING])]),
+                msg("tool_use", [toolUse("tu_1", "get_audit_settings", [audit: "month-close"])]),
+                evidence([fact("findingId", FINDING, "TOOL")], "never sent")])
+        Map out = send(new AgentOrchestrator(g, AVAILABLE), "Why is this one open?")
+        assertEquals("AI_PAUSED", out.outcome, out.toString())
+        assertEquals("Your AI access is paused at its spending limit; a Darpan admin can lift it.", out.reply)
+        assertEquals(2, g.sent.size(), "the investigator's second request is never sent")
+    }
+
+    @Test
     void "every turn row names the user and the grant"() {
         def g = new AgentRoleLoopTests.ScriptedGateway([
                 router([item("EXPLAIN", "Why is this one open?", 0.9, [FINDING])]),

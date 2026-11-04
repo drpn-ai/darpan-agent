@@ -467,6 +467,61 @@ class AgentRoleLoopTests {
         assertEquals(300L, AgentUsageLedger.costMicros("claude-haiku-5-5", u))
     }
 
+    // ------------------------------------------------------------------ DAR-BE-194: the grant inside a role
+
+    private String grantFor(Long capMicros) {
+        return asSystem {
+            def g = ec.entity.makeValue("darpan.agent.AgentAccessGrant").setAll([userId: USER, companyUserGroupId: MINE,
+                    fromDate: new Timestamp(System.currentTimeMillis() - 3_600_000L), statusId: "ACTIVE", costCapMicros: capMicros])
+            g.setSequencedIdPrimary()
+            g.create()
+            return g.grantId as String
+        }
+    }
+
+    private <T> T asSystem(Closure<T> work) {
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try { return work.call() } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
+    }
+
+    private void dropGrants() {
+        asSystem { ["darpan.agent.AgentAccessGrantEvent", "darpan.agent.AgentAccessGrant"].each { ec.entity.find(it).deleteAll() } }
+    }
+
+    @Test
+    void "a grant that reaches its limit stops the role before its next request"() {
+        // Each scripted Sonnet request costs 400 micro-dollars (100 in x 2 + 20 out x 10); the grant allows 300.
+        String grantId = grantFor(300L)
+        try {
+            def gateway = new ScriptedGateway([msg("tool_use", [toolUse("tu_1", "search_knowledge", [words: "a"])]), msg("end_turn", [text("never sent")])])
+            String turnId = AgentUsageLedger.startTurn(ec, MINE, CONV, "INVESTIGATOR", "claude-sonnet-5-5", USER, grantId)
+            RoleResult r = new CountingLoop().runRole(ec, investigator(), MINE, ask("x"), gateway, turnId)
+            assertEquals("NO_ACCESS", r.outcome)
+            assertEquals(1, gateway.sent.size(), "the second request is never sent")
+            assertEquals("PAUSED", asSystem { ec.entity.find("darpan.agent.AgentAccessGrant").condition("grantId", grantId).useCache(false).one().statusId })
+        } finally {
+            dropGrants()
+        }
+    }
+
+    @Test
+    void "a pause that fails never loses the request's recorded cost"() {
+        String grantId = grantFor(300L)
+        Closure original = AgentUsageLedger.pauser
+        AgentUsageLedger.pauser = { def e, String id -> throw new IllegalStateException("pause write failed") }
+        try {
+            String turnId = AgentUsageLedger.startTurn(ec, MINE, CONV, "INVESTIGATOR", "claude-sonnet-5-5", USER, grantId)
+            Usage u = MAPPER.readValue('{"input_tokens":100,"output_tokens":20}', Usage)
+            assertEquals(400L, AgentUsageLedger.record(ec, MINE, turnId, u, "claude-sonnet-5-5"))
+            assertEquals(400L, turnRow(turnId).costMicros as long, "the cost stays on the ledger, so the caps still count it")
+            assertFalse(ec.message.hasError(), "a failed pause leaves no error behind for the turn: ${ec.message.errorsString}")
+            assertEquals(darpan.agent.AgentAccess.PAUSED, darpan.agent.AgentAccess.access(ec, MINE, USER).state, "and access still reads the limit from spend")
+        } finally {
+            AgentUsageLedger.pauser = original
+            dropGrants()
+        }
+    }
+
     @Test
     void "the request prefix is byte-identical across two turns"() {
         def first = new ScriptedGateway([msg("end_turn", [text("one")])])

@@ -4,6 +4,8 @@ import com.anthropic.models.messages.Usage
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import org.moqui.entity.EntityCondition
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 
 import java.math.RoundingMode
 import java.sql.Timestamp
@@ -17,6 +19,7 @@ import java.time.ZoneOffset
  * commits on its own, so a turn that fails later keeps what its requests already cost, and the daily cap counts it.
  */
 class AgentUsageLedger {
+    private static final Logger logger = LoggerFactory.getLogger(AgentUsageLedger.class)
     private static final String TURN = "darpan.agent.AgentTurn"
     private static final String CONVERSATION = "darpan.agent.AgentConversation"
     /** The turn is the pinned tenant's, compared on the row: the active tenant may have changed in another tab. */
@@ -57,15 +60,20 @@ class AgentUsageLedger {
     /** The conversation and role of the pinned tenant's turn, or null when the turn is not that tenant's. */
     static Map turnOf(def ec, String turnId, String pinnedTenantId) {
         def row = TenantScopedFinder.findOneOwnedByTenant(ec, TURN, "turnId", turnId, pinnedTenantId, WHY)
-        return row == null ? null : [conversationId: row.conversationId, companyUserGroupId: row.companyUserGroupId, role: row.role]
+        return row == null ? null : [conversationId: row.conversationId, companyUserGroupId: row.companyUserGroupId, role: row.role,
+                                     userId: row.userId, grantId: row.grantId]
     }
 
     /**
      * Adds one request's usage to the pinned tenant's turn and answers its cost in micro-dollars. Recorded even when the
      * active tenant changed during the request (the money is spent either way), so a tab switch cannot dodge the daily cap.
      */
+    /** Pauses a grant that reached its limit (AgentAccess.pauseIfOverLimit); tests replace it to make the pause fail. */
+    static Closure<Boolean> pauser = { def e, String grantId -> darpan.agent.AgentAccess.pauseIfOverLimit(e, grantId) }
+
     static long record(def ec, String pinnedTenantId, String turnId, Usage usage, String model) {
         long cost = costMicros(model, usage)
+        String grantId = null
         ec.transaction.runRequireNew(null, "Could not record agent usage") {
             def row = owned(ec, turnId, pinnedTenantId)
             row.requestCount = ((row.requestCount ?: 0L) as long) + 1L
@@ -76,9 +84,17 @@ class AgentUsageLedger {
             row.costMicros = ((row.costMicros ?: 0L) as long) + cost
             row.model = model
             row.update()
-            // DAR-BE-194: a grant whose spend this request took to its limit pauses here, in the same transaction; the
-            // orchestrator's next role check then ends the turn AI_PAUSED.
-            if (row.grantId) darpan.agent.AgentAccess.pauseIfOverLimit(ec, row.grantId as String)
+            grantId = row.grantId as String
+        }
+        // DAR-BE-194: a grant this request took to its limit pauses in its own transaction, after the cost is committed, so a
+        // failed pause never takes the cost off the ledger (the caps would under-count). Enforcement does not wait on the
+        // write: AgentAccess.access reads a grant at its limit as PAUSED from spend alone.
+        if (grantId) {
+            try {
+                ec.transaction.runRequireNew(null, "Could not pause the AI access grant") { pauser.call(ec, grantId) }
+            } catch (Exception e) {
+                logger.warn("Could not pause AI access grant ${grantId} at its limit; access still reads it as paused from spend".toString(), e)
+            }
         }
         return cost
     }
