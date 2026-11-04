@@ -34,7 +34,7 @@ goes live: a person approves every change separately.
 ## Reply
 
 After the tool calls, reply to the person in plain text: what you drafted or raised and why, citing finding ids, record
-keys or fields. Never say a finding is fixed: a change applies only after a person approves it.
+keys or fields. Never say a finding is fixed (a change applies only after a person approves it), and do not mention whether it is.
 
 ## Where each kind of request goes
 

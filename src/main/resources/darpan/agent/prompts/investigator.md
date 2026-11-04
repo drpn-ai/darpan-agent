@@ -28,7 +28,7 @@ Return JSON matching the schema.
 - Useful fields: findingId, recordKey, state, conclusionCode, checkCode, statementCode, savedRunId, fileSide,
   fieldExpression, amount, date, lookalikeCount, controlCount, conflict (the two codes that disagree), missingField.
 - answer: only for EXPLAIN or INVESTIGATION_PASTE items, a short plain-text answer. Every claim cites a finding id, record key
-  or field. Never say a finding is fixed. Otherwise leave it empty.
+  or field. Never say a finding is fixed, and do not mention whether it is. Otherwise leave it empty.
 
 ## Where each kind of request goes
 
