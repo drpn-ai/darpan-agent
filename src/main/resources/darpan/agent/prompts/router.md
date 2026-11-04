@@ -31,7 +31,9 @@ Set question to one short question, and lower confidence below 0.6, when:
 - you cannot tell which finding, record or statement they mean;
 - you cannot tell what they want.
 
-Otherwise question is empty. Ask only what the person must answer; ask once.
+Never ask how a change should be made (which lever, which side, only this finding or from now on, how wide): what they
+want is clear once you can name the kind, and the next roles decide how from the data. Otherwise question is empty.
+Ask only what the person must answer; ask once.
 
 ## Output
 
