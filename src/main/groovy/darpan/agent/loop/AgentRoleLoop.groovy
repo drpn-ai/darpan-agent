@@ -58,6 +58,11 @@ class AgentRoleLoop {
     static final int SAME_CALL_LIMIT = 3
     /** Less than this left and no request (or retry) starts. */
     static final long MIN_REQUEST_TIMEOUT_MS = 5_000L
+    /**
+     * Sent after the tool results when the investigator's next request is its last: a tool it calls then never runs, so
+     * without this a wide read ends BUDGET with nothing, though what it already read usually answers the person.
+     */
+    static final String LAST_REQUEST_NOTICE = "This is your last request: no tool you call now will run. Return the evidence JSON now from what you have read, and say in it what you could not check."
     /** Retries of one request, each only before any streamed byte and inside the deadline. */
     static final int MAX_RETRIES = 2
     static final long BACKOFF_BASE_MS = 500L
@@ -212,6 +217,8 @@ class AgentRoleLoop {
                     result.pendingToolResults = answers
                     return finish(ec, pinnedTenantId, turnId, result, control.outcome as String)
                 }
+                if (spec.role == RoleSpec.INVESTIGATOR && result.requestCount + 1 >= spec.maxRequests)
+                    answers << ContentBlockParam.ofText(TextBlockParam.builder().text(LAST_REQUEST_NOTICE).build())
                 result.messages.add(MessageParam.ofUserOfContentBlockParams(answers))
                 continue
             }

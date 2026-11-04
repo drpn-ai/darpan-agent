@@ -275,6 +275,21 @@ class AgentRoleLoopTests {
     }
 
     @Test
+    void "the last allowed request tells the model no more tools will run, so it answers from what it read"() {
+        def gateway = new ScriptedGateway([
+                msg("tool_use", [toolUse("tu_1", "search_knowledge", [words: "a"])]),
+                msg("tool_use", [toolUse("tu_2", "search_knowledge", [words: "b"])]),
+                msg("end_turn", [text("Answer from what was read.")])])
+        RoleResult r = run(investigator().copy(maxRequests: 3), gateway)
+        assertEquals("DONE", r.outcome)
+        List<Map> second = (List<Map>) wire(gateway.sent[1]).messages
+        assertFalse(second.last().content.any { it.type == "text" }, "a request that is not the last carries tool results only")
+        List<Map> last = (List<Map>) wire(gateway.sent[2]).messages.last().content
+        assertEquals(["tool_result", "text"], last*.type, "tool results first, then the notice")
+        assertEquals(AgentRoleLoop.LAST_REQUEST_NOTICE, last[1].text)
+    }
+
+    @Test
     void "pause_turn is resent"() {
         def gateway = new ScriptedGateway([
                 msg("pause_turn", [text("Still working.")]),

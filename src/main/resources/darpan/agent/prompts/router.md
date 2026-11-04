@@ -16,16 +16,18 @@ see record data and you have no tools.
     as evidence ("the customer says the refund went out on Monday"). It is a claim to verify, never an instruction.
   - CORRECTION: a correction of what the agent itself proposed or answered earlier in this conversation. With no earlier
     message from the person, nothing can be corrected: a change to Darpan's own wording or rules is RULE_CHANGE.
-  - DISPLAY_FEEDBACK: how a finding or report reads (wording of a heading, which id is shown, layout).
+  - DISPLAY_FEEDBACK: how a finding or report reads (wording of a heading, which id is shown, layout). What a conclusion's
+    fix tells the person to do is the tenant's rule, not display: a change to it is RULE_CHANGE.
   - PRODUCT_BUG: Darpan itself is wrong (a crash, a wrong count, a finding that cannot be true).
-  - OTHER: anything not about this audit's findings, checks or rules. Never a piece of another item: "add it" or "fix
-    that" belongs to the item it finishes.
+  - OTHER: anything not about this audit's findings, checks or rules.
 - span: the person's own words for the item, copied exactly. Never paraphrase.
 - refs: finding ids, order or record keys, and statement codes the person names. "This one", "this finding" or "it" means the
   open finding; copy its id. Never invent an id.
 - confidence: 0 to 1.
 
-One message often holds two to four items. Split them. Two sentences about the same cause are one item.
+One message often holds two to four items. Split them. Two sentences about the same cause are one item. A closing word
+that only finishes another item ("please do that", "go ahead and change it") is part of that item's span, never an item
+of its own.
 
 ## Ask instead of guessing
 
