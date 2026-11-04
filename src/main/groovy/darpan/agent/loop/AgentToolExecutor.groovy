@@ -270,9 +270,58 @@ class AgentToolExecutor {
         return out.asImmutable()
     }
 
-    /** name, description and input_schema as the SDK Tool, strict:true; additionalProperties:false comes from the schema. */
+    /**
+     * name, description and input_schema as the SDK Tool; strict unless the catalog entry says "strict": false (raise_ticket,
+     * so the author's strict tools stay within {@link #STRICT_OPTIONAL_LIMIT}; execute validates every input either way).
+     * additionalProperties:false comes from the schema.
+     */
     private static Tool definition(Map t) {
         String json = JsonOutput.toJson([name: t.name, description: t.description, input_schema: t.input_schema])
-        return ObjectMappers.jsonMapper().readValue(json, Tool).toBuilder().strict(true).build()
+        return ObjectMappers.jsonMapper().readValue(json, Tool).toBuilder().strict(isStrict(t)).build()
+    }
+
+    private static boolean isStrict(Map t) { return t.strict != false }
+
+    /**
+     * The most optional parameters the Messages API accepts across one request's strict tools: more is a 400 ("Schemas
+     * contains too many optional parameters ... (limit: 24)"). An optional parameter is a property not in its object's
+     * required list, nested ones included.
+     */
+    static final int STRICT_OPTIONAL_LIMIT = 24
+
+    /** Optional parameters across these tools' input schemas, strict or not. */
+    static int optionalParameters(List<String> names) {
+        return names.sum(0) { String n -> optionalIn((Map) toolOf(n).input_schema) } as int
+    }
+
+    /** Optional parameters across the strict ones of these tools: what the API counts against the limit. */
+    static int strictOptionalParameters(List<String> names) {
+        return optionalParameters(names.findAll { String n -> isStrict(toolOf(n)) })
+    }
+
+    /** Throws when these tools' strict schemas hold more than limit optional parameters (RoleSpec passes STRICT_OPTIONAL_LIMIT). */
+    static void requireWithinStrictLimit(String role, List<String> names, int limit) {
+        int n = strictOptionalParameters(names)
+        if (n > limit) throw new IllegalArgumentException(("Role ${role}: its strict tools hold ${n} optional parameters; the API " +
+                "accepts at most ${limit}. Make a property required, or send a tool without strict.").toString())
+    }
+
+    private static Map toolOf(String name) {
+        Map t = TOOLS[name]
+        if (t == null) throw new IllegalArgumentException("Unknown tool ${name}".toString())
+        return t
+    }
+
+    private static int optionalIn(Map s) {
+        if (s == null) return 0
+        int n = 0
+        // s.get("properties"), never s.properties: on a Map, Groovy 4 resolves .properties to getProperties().
+        Map props = (Map) s.get("properties")
+        if (props) {
+            List required = (List) (s.required ?: [])
+            props.each { Object k, Object v -> if (!(k in required)) n++; n += optionalIn((Map) v) }
+        }
+        if (s.items instanceof Map) n += optionalIn((Map) s.items)
+        return n
     }
 }

@@ -42,6 +42,8 @@ final class RoleSpec {
         tools.each { String t ->
             if (!AgentToolExecutor.TOOLS.containsKey(t)) throw new IllegalArgumentException("Tool ${t} is not in the agent's tool catalog".toString())
         }
+        // The API refuses a request past this (a 400 on every request of the role), so the spec is refused instead.
+        AgentToolExecutor.requireWithinStrictLimit(role, tools, AgentToolExecutor.STRICT_OPTIONAL_LIMIT)
     }
 
     static RoleSpec router(Map outputSchema = null) {

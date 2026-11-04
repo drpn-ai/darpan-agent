@@ -487,7 +487,8 @@ class AgentRoleLoopTests {
         assertEquals([], tools.findAll { it.cache_control }, "no tool carries a cache marker")
         assertEquals([type: "ephemeral"], w.cache_control, "a role that sends more than one request caches its growing tail (automatic caching)")
         tools.each { Map t ->
-            assertEquals(true, t.strict, t.name as String)
+            // raise_ticket goes without strict so the author's strict tools stay within the API's optional-parameter limit.
+            assertEquals(t.name != "raise_ticket", t.strict ?: false, t.name as String)
             assertEquals(false, t.input_schema.additionalProperties, t.name as String)
         }
         assertEquals([type: "ephemeral"], ((List<Map>) w.system)[0].cache_control)

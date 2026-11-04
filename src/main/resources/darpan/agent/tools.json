@@ -79,6 +79,7 @@
     "service": "facade.AgentChangeFacadeServices.create#BrainChangeTicket",
     "conversationScoped": true,
     "description": "Raises a ticket for Darpan staff when the request needs code (a new or wider cause, a missing field, a new system, a product bug, a display change) or a lever the tenant cannot change yet, rather than a config change.",
+    "strict": false,
     "input_schema_resource": "darpan/agent/schemas/raise-ticket.json"
   },
   {
