@@ -31,10 +31,11 @@ tasks.withType(GroovyCompile) { options.compilerArgs << "-proc:none" }
 
 configurations.all {
     resolutionStrategy.eachDependency { details ->
-        // The framework pins jackson-databind 2.20.1 (framework/build.gradle); every jackson module must agree.
+        // The framework pins jackson-databind 2.21.2 (framework/build.gradle, DAR-BE-185's alignment with Spark 4.2.1); every
+        // jackson module must agree, or Spark's jackson-module-scala is forced to a version that does not exist for it.
         if (details.requested.group == 'com.fasterxml.jackson' || details.requested.group.startsWith('com.fasterxml.jackson.')) {
-            // jackson-annotations is released as 2.20 (no patch), per jackson-bom 2.20.1.
-            details.useVersion(details.requested.name == 'jackson-annotations' ? '2.20' : '2.20.1')
+            // jackson-annotations is released as 2.21 (no patch), per jackson-bom 2.21.2.
+            details.useVersion(details.requested.name == 'jackson-annotations' ? '2.21' : '2.21.2')
         }
     }
 }
