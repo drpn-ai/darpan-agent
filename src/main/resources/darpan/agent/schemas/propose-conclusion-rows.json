@@ -1,0 +1,104 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "savedRunId",
+    "rows",
+    "reasonText",
+    "evidence"
+  ],
+  "properties": {
+    "savedRunId": {
+      "type": "string"
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conclusionCode",
+          "parentConclusionCode",
+          "bucket",
+          "fixActionTemplate",
+          "conditions"
+        ],
+        "properties": {
+          "conclusionCode": {
+            "type": "string"
+          },
+          "parentConclusionCode": {
+            "type": "string",
+            "description": "Empty for a top-level row."
+          },
+          "bucket": {
+            "type": "string",
+            "description": "Empty for none."
+          },
+          "fixActionTemplate": {
+            "type": "string",
+            "description": "Empty for none."
+          },
+          "conditions": {
+            "type": "array",
+            "description": "Empty for none.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "fieldExpression",
+                "operator",
+                "checkValue"
+              ],
+              "properties": {
+                "fieldExpression": {
+                  "type": "string"
+                },
+                "operator": {
+                  "type": "string"
+                },
+                "checkValue": {
+                  "type": "string",
+                  "description": "Empty for none. For IN and NOT_IN, the values separated by commas."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "reasonText": {
+      "type": "string",
+      "description": "Why, citing finding ids, record keys or fields; at most 1000 characters."
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field",
+          "value",
+          "source"
+        ],
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "HUMAN",
+              "CONFIG",
+              "TOOL"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

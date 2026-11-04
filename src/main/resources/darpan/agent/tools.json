@@ -68,11 +68,36 @@
     }
   },
   {
-    "name": "propose_change",
+    "name": "propose_exclusion",
     "service": "facade.AgentChangeFacadeServices.create#AuditChangeProposal",
     "conversationScoped": true,
-    "description": "Drafts one change to the audit's config for a person to approve. Nothing changes until a person applies it. target and after carry only the keys of the kind (see their descriptions). Every record id in after must be one the person typed, the open finding's own, or already in the config; any other id blocks the draft.",
-    "input_schema_resource": "darpan/agent/schemas/propose-change.json"
+    "description": "Drafts leaving records out of a check: values added to an exclusion on one side of the check's run. Nothing changes until a person approves it. Every record id in it must be one the person typed, the open finding's own, or already in the config; any other id blocks the draft. An empty string or list means not given.",
+    "proposal": {"kind": "EXCLUSION_FILTER", "target": ["savedRunId", "fileSide"], "after": ["fieldExpression", "filterValues"]},
+    "input_schema_resource": "darpan/agent/schemas/propose-exclusion.json"
+  },
+  {
+    "name": "propose_statement_narrowing",
+    "service": "facade.AgentChangeFacadeServices.create#AuditChangeProposal",
+    "conversationScoped": true,
+    "description": "Drafts narrowing what a statement covers on one check: the diff types, conclusion codes or rule ids it keeps. Nothing changes until a person approves it. Every record id in it must be one the person typed, the open finding's own, or already in the config; any other id blocks the draft. An empty string or list means not given.",
+    "proposal": {"kind": "STATEMENT_NARROWING", "target": ["auditId", "checkCode", "statementCode"], "after": ["diffTypes", "conclusionCodes", "ruleIds"]},
+    "input_schema_resource": "darpan/agent/schemas/propose-statement-narrowing.json"
+  },
+  {
+    "name": "propose_fix_text",
+    "service": "facade.AgentChangeFacadeServices.create#AuditChangeProposal",
+    "conversationScoped": true,
+    "description": "Drafts new fix wording for one conclusion of a run. Nothing changes until a person approves it. Every record id in it must be one the person typed, the open finding's own, or already in the config; any other id blocks the draft. An empty string or list means not given.",
+    "proposal": {"kind": "FIX_TEXT", "target": ["savedRunId", "conclusionCode"], "after": ["fixActionTemplate"]},
+    "input_schema_resource": "darpan/agent/schemas/propose-fix-text.json"
+  },
+  {
+    "name": "propose_conclusion_rows",
+    "service": "facade.AgentChangeFacadeServices.create#AuditChangeProposal",
+    "conversationScoped": true,
+    "description": "Drafts rows in a run's own conclusion tree (a cause with its conditions). Nothing changes until a person approves it. Every record id in it must be one the person typed, the open finding's own, or already in the config; any other id blocks the draft. An empty string or list means not given.",
+    "proposal": {"kind": "CONCLUSION_ROWS", "target": ["savedRunId"], "after": ["rows"]},
+    "input_schema_resource": "darpan/agent/schemas/propose-conclusion-rows.json"
   },
   {
     "name": "raise_ticket",
@@ -89,10 +114,10 @@
     "input_schema": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["question"],
+      "required": ["question", "options"],
       "properties": {
         "question": {"type": "string"},
-        "options": {"type": "array", "items": {"type": "string"}}
+        "options": {"type": "array", "items": {"type": "string"}, "description": "Choices to offer; empty for none."}
       }
     }
   },

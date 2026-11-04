@@ -203,8 +203,8 @@ class AgentRoleLoopTests {
     @Test
     void "a tool outside the role's list is answered TOOL_NOT_PERMITTED and never runs"() {
         def gateway = new ScriptedGateway([
-                msg("tool_use", [toolUse("tu_1", "propose_change", [kind: "FIX_TEXT", target: [savedRunId: "R1", conclusionCode: "C1"],
-                        after: [fixActionTemplate: "Re-send it."], reasonText: "x", evidence: []])]),
+                msg("tool_use", [toolUse("tu_1", "propose_fix_text", [savedRunId: "R1", conclusionCode: "C1",
+                        fixActionTemplate: "Re-send it.", reasonText: "x", evidence: []])]),
                 msg("end_turn", [text("ok")])])
         def loop = new CountingLoop()
         RoleResult r = run(investigator(), gateway, loop)
@@ -229,7 +229,7 @@ class AgentRoleLoopTests {
         }
         assertFalse(AgentToolExecutor.TOOLS.values().any { Map t -> approving.any { a -> (t.service as String)?.endsWith(a) } })
         approving.each { String name ->
-            assertThrows(IllegalArgumentException) { RoleSpec.author().copy(tools: ["propose_change", name]) }
+            assertThrows(IllegalArgumentException) { RoleSpec.author().copy(tools: ["propose_fix_text", name]) }
         }
         def gateway = new ScriptedGateway([
                 msg("tool_use", [toolUse("tu_1", "apply#AuditChange", [proposalId: "P1", planHash: "h"])]),
@@ -421,14 +421,14 @@ class AgentRoleLoopTests {
     @Test
     void "a control tool before another call answers the later call NOT_RUN without running it"() {
         def gateway = new ScriptedGateway([msg("tool_use", [
-                toolUse("tu_1", "ask_human", [question: "Which store?"]),
-                toolUse("tu_2", "propose_change", [kind: "FIX_TEXT", target: [savedRunId: "R1", conclusionCode: "C1"],
-                        after: [fixActionTemplate: "Re-send it."], reasonText: "x", evidence: []])])])
+                toolUse("tu_1", "ask_human", [question: "Which store?", options: []]),
+                toolUse("tu_2", "propose_fix_text", [savedRunId: "R1", conclusionCode: "C1",
+                        fixActionTemplate: "Re-send it.", reasonText: "x", evidence: []])])])
         def loop = new CountingLoop()
         RoleResult r = run(author(), gateway, loop)
         assertEquals("QUESTION", r.outcome)
         assertEquals("tu_1", r.control.toolUseId)
-        assertEquals([], loop.executor.invoked, "propose_change never runs")
+        assertEquals([], loop.executor.invoked, "propose_fix_text never runs")
         assertEquals(0L, count("darpan.agent.AuditChangeProposal"))
         assertEquals(1, r.pendingToolResults.size())
         def pending = r.pendingToolResults[0].asToolResult()

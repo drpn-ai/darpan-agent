@@ -1,0 +1,55 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "savedRunId",
+    "conclusionCode",
+    "fixActionTemplate",
+    "reasonText",
+    "evidence"
+  ],
+  "properties": {
+    "savedRunId": {
+      "type": "string"
+    },
+    "conclusionCode": {
+      "type": "string"
+    },
+    "fixActionTemplate": {
+      "type": "string",
+      "description": "At most 1000 characters."
+    },
+    "reasonText": {
+      "type": "string",
+      "description": "Why, citing finding ids, record keys or fields; at most 1000 characters."
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field",
+          "value",
+          "source"
+        ],
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "HUMAN",
+              "CONFIG",
+              "TOOL"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

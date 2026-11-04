@@ -43,7 +43,7 @@ final class RoleSpec {
             if (!AgentToolExecutor.TOOLS.containsKey(t)) throw new IllegalArgumentException("Tool ${t} is not in the agent's tool catalog".toString())
         }
         // The API refuses a request past this (a 400 on every request of the role), so the spec is refused instead.
-        AgentToolExecutor.requireWithinStrictLimit(role, tools, AgentToolExecutor.STRICT_OPTIONAL_LIMIT)
+        AgentToolExecutor.requireWithinStrictLimits(role, tools, outputSchema)
     }
 
     static RoleSpec router(Map outputSchema = null) {
@@ -62,7 +62,8 @@ final class RoleSpec {
 
     static RoleSpec author() {
         return new RoleSpec(role: AUTHOR, model: "claude-opus-5-5", effort: "HIGH", systemPromptPath: "darpan/agent/prompts/author.md",
-                tools: ["propose_change", "raise_ticket", "ask_human", "request_more_evidence"],
+                tools: ["propose_exclusion", "propose_statement_narrowing", "propose_fix_text", "propose_conclusion_rows", "raise_ticket",
+                        "ask_human", "request_more_evidence"],
                 maxRequests: 8, maxToolCalls: 6, wallClockMs: 120_000L, maxTokens: 32_000L)
     }
 

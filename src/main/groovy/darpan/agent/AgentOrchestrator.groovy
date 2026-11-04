@@ -34,7 +34,7 @@ import java.util.regex.Pattern
  *   ROUTER   Haiku, no tools, never record data: items[] {kind, span, refs, confidence}, or one question
  *   OTHER    a fixed decline; no other model call
  *   INVESTIGATOR  Sonnet, read tools: typed Evidence (each value tagged HUMAN, CONFIG or TOOL) plus an answer for EXPLAIN
- *   AUTHOR   Opus: propose_change / raise_ticket / ask_human / request_more_evidence (at most 2 rounds). It reads the verbatim
+ *   AUTHOR   Opus: propose_* (one tool per proposal kind) / raise_ticket / ask_human / request_more_evidence (at most 2 rounds). It reads the verbatim
  *            words, the turn's items, the Evidence (validated, typed, pruned: never the investigator's raw tool text or its
  *            prose answer) and the brain catalog in its cached prefix. DISPLAY_FEEDBACK and PRODUCT_BUG go to it with
  *            raise_ticket only.
@@ -486,7 +486,7 @@ class AgentOrchestrator {
         // any transcript write: a failed write then ends the turn ERROR with these ids, never "nothing was changed".
         r.toolCalls.each { Map call ->
             if (call.isError) return
-            if (call.name == "propose_change") {
+            if (AgentToolExecutor.isProposalTool(call.name as String)) {
                 String id = outValue(call.content as String, "proposalId")
                 Map view = id ? proposalView(turn.ec, turn.pinned, id) : null
                 if (view) turn.proposals[id] = view

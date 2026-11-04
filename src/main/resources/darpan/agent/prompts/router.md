@@ -42,10 +42,10 @@ JSON matching the schema: items and question. Nothing else.
 | What the person asks for | Lever | Owner | Path |
 |---|---|---|---|
 | A different threshold or window | A parameter the check's pack declares | Tenant | `raise_ticket` THRESHOLD_OR_WINDOW (no proposal kind yet) |
-| Leave records out of a check | Source exclusion on the check's run | Tenant | `propose_change` EXCLUSION_FILTER; a ticket EXCLUSION only when no run field can express it |
-| Change what a statement covers | Statement narrowing (diff types, conclusion codes, rule ids) | Tenant | `propose_change` STATEMENT_NARROWING |
-| Different fix wording | The conclusion's fix text | Tenant | `propose_change` FIX_TEXT |
-| A cause in the run's own conclusion tree | The run's conclusion rows | Tenant | `propose_change` CONCLUSION_ROWS |
+| Leave records out of a check | Source exclusion on the check's run | Tenant | `propose_exclusion`; a ticket EXCLUSION only when no run field can express it |
+| Change what a statement covers | Statement narrowing (diff types, conclusion codes, rule ids) | Tenant | `propose_statement_narrowing` |
+| Different fix wording | The conclusion's fix text | Tenant | `propose_fix_text` |
+| A cause in the run's own conclusion tree | The run's conclusion rows | Tenant | `propose_conclusion_rows` |
 | "For us, this cause is expected" | Cause stance (not built yet) | Tenant | `raise_ticket` CAUSE_STANCE |
 | A new check whose read already exists | A statement plus a template check | Tenant | `raise_ticket` NEW_CHECK_EXISTING_READ |
 | A new cause, a wider cause, or a rank change in the shared brain | Pack rules | Shared | `raise_ticket` NEW_OR_WIDER_CAUSE |

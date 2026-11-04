@@ -1,0 +1,68 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "savedRunId",
+    "fileSide",
+    "fieldExpression",
+    "filterValues",
+    "reasonText",
+    "evidence"
+  ],
+  "properties": {
+    "savedRunId": {
+      "type": "string"
+    },
+    "fileSide": {
+      "type": "string",
+      "enum": [
+        "FILE_1",
+        "FILE_2"
+      ]
+    },
+    "fieldExpression": {
+      "type": "string",
+      "description": "Empty to exclude by the run side's primary id; a field expression only for another field the person names."
+    },
+    "filterValues": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      },
+      "description": "Added to the field's existing exclusions; an exclusion cannot be removed and a scope cannot be changed."
+    },
+    "reasonText": {
+      "type": "string",
+      "description": "Why, citing finding ids, record keys or fields; at most 1000 characters."
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field",
+          "value",
+          "source"
+        ],
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "HUMAN",
+              "CONFIG",
+              "TOOL"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

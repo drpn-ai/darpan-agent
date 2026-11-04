@@ -73,7 +73,7 @@ class AgentToolExecutor {
         if (problems) return [isError: true, content: "${INVALID_INPUT}: ${problems.join('; ')}".toString()]
         if (tool.control) return [isError: false, control: tool.control as String, content: null]
 
-        Map params = new LinkedHashMap(input)
+        Map params = tool.proposal != null ? proposalParams((Map) tool.proposal, input) : new LinkedHashMap(input)
         if (tool.conversationScoped) params.conversationId = conversationId
         String service = tool.service as String
         Map done = AgentCallMarker.run {
@@ -102,7 +102,7 @@ class AgentToolExecutor {
 
     /**
      * What the author's model reads of a write tool's result (spec 10.3: the author never reads raw tool text). The full
-     * result stays in content, for the transcript; the model gets typed fields only: propose_change {proposalId, status,
+     * result stays in content, for the transcript; the model gets typed fields only: a proposal tool {proposalId, status,
      * statusCode (STATUS_CODES, never the free-text statusMessage), provenanceStatus, blockedCount, backtest {supported, reason, closedCount, openedCount, limits}} (no
      * finding ids, record keys or exception detail), raise_ticket {ticketId, duplicate}, and a fixed TOOL_ERROR for any
      * error the service reported.
@@ -113,7 +113,7 @@ class AgentToolExecutor {
         try { out = new groovy.json.JsonSlurper().parseText(content ?: "") } catch (Exception ignored) { out = null }
         if (!(out instanceof Map)) return TOOL_ERROR
         Map o = (Map) out
-        if (toolName == "propose_change") {
+        if (isProposalTool(toolName)) {
             Map bt = o.backtest instanceof Map ? (Map) o.backtest : null
             return JsonOutput.toJson([proposalId: token(o.proposalId), status: token(o.status), statusCode: statusCode(o),
                     provenanceStatus: token(o.provenanceStatus), blockedCount: o.blockedIds instanceof List ? ((List) o.blockedIds).size() : 0,
@@ -228,7 +228,7 @@ class AgentToolExecutor {
 
     /**
      * An entry's input_schema, inline or (input_schema_resource) read from a schema file, so a schema the orchestrator also
-     * validates against exists once (darpan/agent/schemas/propose-change.json, raise-ticket.json).
+     * validates against exists once (darpan/agent/schemas/*.json).
      */
     private static Map withSchema(Map t) {
         String path = t.input_schema_resource as String
@@ -283,45 +283,88 @@ class AgentToolExecutor {
     private static boolean isStrict(Map t) { return t.strict != false }
 
     /**
-     * The most optional parameters the Messages API accepts across one request's strict tools: more is a 400 ("Schemas
-     * contains too many optional parameters ... (limit: 24)"). An optional parameter is a property not in its object's
-     * required list, nested ones included.
+     * The Messages API's published strict limits for one request, across all strict tool schemas and the JSON output schema
+     * (structured-outputs docs, "Schema complexity limits"): strict tools; optional parameters (a property not in its
+     * object's required list, nested ones included); parameters with union types (anyOf or a type array). Past any of them
+     * every request of the role is a 400. The compiled grammar has a further, unpublished size limit ("Schema is too
+     * complex"); flat schemas with every field required stay well inside it.
      */
+    static final int STRICT_TOOL_LIMIT = 20
     static final int STRICT_OPTIONAL_LIMIT = 24
+    static final int STRICT_UNION_LIMIT = 16
 
-    /** Optional parameters across these tools' input schemas, strict or not. */
-    static int optionalParameters(List<String> names) {
-        return names.sum(0) { String n -> optionalIn((Map) toolOf(n).input_schema) } as int
+    /** [tools, optional, unions] of these tools' strict schemas plus the output schema (which is always enforced). */
+    static Map<String, Integer> strictCounts(List<String> names, Map outputSchema) {
+        List<String> strict = names.findAll { String n -> isStrict(toolOf(n)) }
+        List<Map> schemas = strict.collect { String n -> (Map) toolOf(n).input_schema } + (outputSchema == null ? [] : [outputSchema])
+        int optional = 0, unions = 0
+        schemas.each { Map s -> Map c = schemaCounts(s); optional += c.optional as int; unions += c.unions as int }
+        return [tools: strict.size(), optional: optional, unions: unions]
     }
 
-    /** Optional parameters across the strict ones of these tools: what the API counts against the limit. */
-    static int strictOptionalParameters(List<String> names) {
-        return optionalParameters(names.findAll { String n -> isStrict(toolOf(n)) })
+    /** [optional, unions] in one schema. */
+    static Map<String, Integer> schemaCounts(Map s) {
+        int optional = 0, unions = 0
+        if (s == null) return [optional: 0, unions: 0]
+        if (s.type instanceof List || s.anyOf != null) unions++
+        // s.get("properties"), never s.properties: on a Map, Groovy 4 resolves .properties to getProperties().
+        Map props = (Map) s.get("properties")
+        if (props) {
+            List required = (List) (s.required ?: [])
+            props.each { Object k, Object v ->
+                if (!(k in required)) optional++
+                Map c = schemaCounts((Map) v); optional += c.optional as int; unions += c.unions as int
+            }
+        }
+        if (s.items instanceof Map) { Map c = schemaCounts((Map) s.items); optional += c.optional as int; unions += c.unions as int }
+        ((List) (s.anyOf ?: [])).each { Object x -> Map c = schemaCounts((Map) x); optional += c.optional as int; unions += c.unions as int }
+        return [optional: optional, unions: unions]
     }
 
-    /** Throws when these tools' strict schemas hold more than limit optional parameters (RoleSpec passes STRICT_OPTIONAL_LIMIT). */
-    static void requireWithinStrictLimit(String role, List<String> names, int limit) {
-        int n = strictOptionalParameters(names)
-        if (n > limit) throw new IllegalArgumentException(("Role ${role}: its strict tools hold ${n} optional parameters; the API " +
-                "accepts at most ${limit}. Make a property required, or send a tool without strict.").toString())
+    /** Throws when a role's strict schemas pass a published limit (RoleSpec calls it, so a grown schema fails at build time). */
+    static void requireWithinStrictLimits(String role, List<String> names, Map outputSchema) {
+        Map n = strictCounts(names, outputSchema)
+        List<String> over = []
+        if ((n.tools as int) > STRICT_TOOL_LIMIT) over << "${n.tools} strict tools (at most ${STRICT_TOOL_LIMIT})".toString()
+        if ((n.optional as int) > STRICT_OPTIONAL_LIMIT) over << "${n.optional} optional parameters (at most ${STRICT_OPTIONAL_LIMIT})".toString()
+        if ((n.unions as int) > STRICT_UNION_LIMIT) over << "${n.unions} union-type parameters (at most ${STRICT_UNION_LIMIT})".toString()
+        if (over) throw new IllegalArgumentException("Role ${role}: its strict schemas hold ${over.join(', ')}; the API refuses the request. Make fields required, flatten, or send a tool without strict.".toString())
+    }
+
+    /** A proposal tool: one flat, strict tool per proposal kind, all mapping to create#AuditChangeProposal. */
+    static boolean isProposalTool(String name) { return TOOLS[name]?.proposal != null }
+
+    /**
+     * The proposal service's input from a proposal tool's flat input: {kind, target, after, reasonText, evidence}, target and
+     * after picked by the catalog entry's key lists. An empty string or list is "not given" (every field of a proposal tool is
+     * required, to keep strict schemas small) and is left out at every level of target and after, so the core reads what
+     * it read when the field was absent and refuses a missing required one as before.
+     */
+    static Map proposalParams(Map proposal, Map input) {
+        Closure<Map> pick = { List keys -> (Map) given(keys.collectEntries { [(it): input.get(it)] }) ?: [:] }
+        return [kind: proposal.kind, target: pick((List) proposal.target), after: pick((List) proposal.after),
+                reasonText: input.reasonText, evidence: input.evidence]
+    }
+
+    /** v without empty strings, empty lists and null, in maps and lists at any depth; null when nothing is left. */
+    private static Object given(Object v) {
+        if (v == null) return null
+        if (v instanceof CharSequence) return v.toString().isEmpty() ? null : v
+        if (v instanceof Map) {
+            Map out = new LinkedHashMap()
+            ((Map) v).each { Object k, Object x -> Object g = given(x); if (g != null) out[k] = g }
+            return out.isEmpty() ? null : out
+        }
+        if (v instanceof List) {
+            List out = ((List) v).collect { given(it) }.findAll { it != null }
+            return out.isEmpty() ? null : out
+        }
+        return v
     }
 
     private static Map toolOf(String name) {
         Map t = TOOLS[name]
         if (t == null) throw new IllegalArgumentException("Unknown tool ${name}".toString())
         return t
-    }
-
-    private static int optionalIn(Map s) {
-        if (s == null) return 0
-        int n = 0
-        // s.get("properties"), never s.properties: on a Map, Groovy 4 resolves .properties to getProperties().
-        Map props = (Map) s.get("properties")
-        if (props) {
-            List required = (List) (s.required ?: [])
-            props.each { Object k, Object v -> if (!(k in required)) n++; n += optionalIn((Map) v) }
-        }
-        if (s.items instanceof Map) n += optionalIn((Map) s.items)
-        return n
     }
 }

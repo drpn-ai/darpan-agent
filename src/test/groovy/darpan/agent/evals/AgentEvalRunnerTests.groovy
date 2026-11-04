@@ -75,18 +75,19 @@ class AgentEvalRunnerTests {
 
     static Message author(String stop, List<Map> content) { msg("claude-opus-5-5", stop, content) }
 
-    /** An exclusion of value on the eval run; field null leaves fieldExpression out (R44: the run's primary id). */
+    /**
+     * propose_exclusion's flat input for value on the eval run; field null sends fieldExpression empty (R44: the run's
+     * primary id), "" the run's own field expression.
+     */
     private Map exclusionOf(String value, String field = "") {
-        Map after = [filterValues: [value]]
-        if (field != null) after.fieldExpression = field ?: runner.fieldExpression
-        [kind: "EXCLUSION_FILTER", target: [savedRunId: runner.runId, fileSide: "FILE_1"], after: after,
+        [savedRunId: runner.runId, fileSide: "FILE_1", fieldExpression: field == null ? "" : (field ?: runner.fieldExpression), filterValues: [value],
          reasonText: "Leave ${value} out of the open memo check.".toString(), evidence: [[field: "recordKey", value: value, source: "HUMAN"]]]
     }
 
     private List<Message> leverScript(String words, int run, Map proposal) {
         return [router("CAUSE_FEEDBACK", words), investigatorReads("F-900811"),
                 evidence([[item: 0, field: "recordKey", value: "CM90021", source: "HUMAN"], [item: 0, field: "savedRunId", value: runner.runId, source: "CONFIG"]]),
-                author("tool_use", [tool("tu_p${run}".toString(), "propose_change", proposal)]),
+                author("tool_use", [tool("tu_p${run}".toString(), "propose_exclusion", proposal)]),
                 author("end_turn", [text("Drafted an exclusion of CM90021 (F-900811) for an editor to approve.")])]
     }
 
@@ -186,12 +187,12 @@ class AgentEvalRunnerTests {
         List<Map> facts = [[item: 0, field: "recordKey", value: "CM90990", source: "TOOL"]]
         Map result = runner.runCase(c, scripted([
                 1: [router("CAUSE_FEEDBACK", words), evidence(facts),
-                    author("tool_use", [tool("tu_1", "propose_change", exclusionOf("CM90990"))]), author("end_turn", [text("Drafted.")])],
+                    author("tool_use", [tool("tu_1", "propose_exclusion", exclusionOf("CM90990"))]), author("end_turn", [text("Drafted.")])],
                 2: [router("CAUSE_FEEDBACK", words), evidence(facts),
                     author("tool_use", [tool("tu_2", "raise_ticket", [category: "EXCLUSION", verbatimText: words, refs: [orderKeys: ["CM90990"]]])]),
                     author("end_turn", [text("Raised a ticket.")])],
                 3: [router("CAUSE_FEEDBACK", words), evidence(facts),
-                    author("tool_use", [tool("tu_3", "ask_human", [question: "Which memo do you want left out?"])])]]),
+                    author("tool_use", [tool("tu_3", "ask_human", [question: "Which memo do you want left out?", options: []])])]]),
                 AgentEvalRunner.OFFLINE_AVAILABLE)
 
         List<Map> runs = (List<Map>) result.runs
