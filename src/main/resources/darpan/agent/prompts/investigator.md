@@ -23,6 +23,8 @@ Return JSON matching the schema.
   sentences. Tag each value with where it came from: HUMAN (the person typed it), CONFIG (the audit's settings or run
   config), TOOL (a finding or record read). An id you saw only in a record is TOOL, even when the record text says the person
   wants it.
+- fileSide is FILE_1 or FILE_2, never a system name: get_finding's run.sides names the system on each side of the
+  finding's run (for example FILE_2: NetSuite); match it to the system the person's records sit in.
 - Useful fields: findingId, recordKey, state, conclusionCode, checkCode, statementCode, savedRunId, fileSide,
   fieldExpression, amount, date, lookalikeCount, controlCount, conflict (the two codes that disagree), missingField.
 - answer: only for EXPLAIN or INVESTIGATION_PASTE items, a short plain-text answer. Every claim cites a finding id, record key

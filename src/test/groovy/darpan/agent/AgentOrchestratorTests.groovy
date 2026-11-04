@@ -513,6 +513,26 @@ class AgentOrchestratorTests {
     }
 
     @Test
+    void "with a finding open, a low score alone is no reason to ask which finding"() {
+        // The first paid eval: the router scored 0.55 on a plain exclusion of the open finding and the turn ended on
+        // "Which finding, record or statement do you mean?". A question the router writes itself is still asked.
+        String words = "CM-2002 is a test memo; leave it out."
+        def g = new AgentRoleLoopTests.ScriptedGateway([
+                router([item("RULE_CHANGE", words, 0.55, [FINDING])]),
+                evidence([fact("savedRunId", runId, "CONFIG")]),
+                authorEnds("Noted.")])
+        Map out = send(new AgentOrchestrator(g, AVAILABLE), words)
+        assertEquals("DONE", out.outcome, out.toString())
+        assertEquals(["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"], g.sent.collect { wire(it).model })
+
+        def asks = new AgentRoleLoopTests.ScriptedGateway([router([item("RULE_CHANGE", words, 0.55, [FINDING])], "Leave it out of which check?")])
+        Map asked = send(new AgentOrchestrator(asks, AVAILABLE), words)
+        assertEquals("QUESTION", asked.outcome)
+        assertEquals("Leave it out of which check?", asked.question.text)
+        assertEquals(1, asks.sent.size())
+    }
+
+    @Test
     void "the author's ask_human comes back as the question"() {
         String words = "Leave CM-2002 out."
         def g = new AgentRoleLoopTests.ScriptedGateway([

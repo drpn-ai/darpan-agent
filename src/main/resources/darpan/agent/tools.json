@@ -2,7 +2,7 @@
   {
     "name": "get_finding",
     "service": "facade.AgentReadFacadeServices.get#AgentFinding",
-    "description": "Reads one audit finding of the active tenant by its id (for example F-20761): its statement, check, record key, state, conclusion and the facts the check recorded.",
+    "description": "Reads one audit finding of the active tenant by its id (for example F-20761): its statement, check, record key, state, conclusion and the facts the check recorded, and the run its check reads with the system on each side (run.sides.FILE_1, FILE_2).",
     "input_schema": {
       "type": "object",
       "additionalProperties": false,

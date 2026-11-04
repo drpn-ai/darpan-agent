@@ -278,7 +278,11 @@ class AgentOrchestrator {
         }
         List<Map> items = ((List<Map>) ((Map) parsed).items).take(MAX_ITEMS)
         String question = ((Map) parsed).question?.toString()?.trim()
-        if (question || items.any { (it.confidence as BigDecimal) < MIN_CONFIDENCE }) {
+        // With a finding open the person's "it" or "this" has its referent, so a low score alone is no reason to ask which
+        // finding they mean (the first paid eval ended a plain exclusion on that question); a question the router wrote
+        // itself is still asked.
+        boolean unsure = !turn.findingId && items.any { (it.confidence as BigDecimal) < MIN_CONFIDENCE }
+        if (question || unsure) {
             turn.question = [text: question ?: CLARIFY, options: [], from: RoleSpec.ROUTER]
             turn.outcome = "QUESTION"
             return null
