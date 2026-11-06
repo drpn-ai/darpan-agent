@@ -62,6 +62,11 @@ class AgentRoleLoop {
      * Sent after the tool results when the investigator's next request is its last: a tool it calls then never runs, so
      * without this a wide read ends BUDGET with nothing, though what it already read usually answers the person.
      */
+    /**
+     * The answer to a read the role already made in this turn with the same input: the result is above in the conversation,
+     * so the service is not run again and the same result is not paid for (or cached) twice.
+     */
+    static final String SAME_AS_EARLIER = "SAME_AS_EARLIER: you made this exact call earlier in this turn; its result is above and has not changed. Work from it."
     static final String LAST_REQUEST_NOTICE = "This is your last request: no tool you call now will run. Return the evidence JSON now from what you have read, and say in it what you could not check."
     /** Retries of one request, each only before any streamed byte and inside the deadline. */
     static final int MAX_RETRIES = 2
@@ -191,6 +196,11 @@ class AgentRoleLoop {
                     String key = use.name() + "\u0000" + canonical(input)
                     int times = (seen[key] ?: 0) + 1
                     if (times >= SAME_CALL_LIMIT) return finish(ec, pinnedTenantId, turnId, result, "LOOP")
+                    if (times > 1 && AgentToolExecutor.isReadTool(use.name())) {
+                        seen[key] = times
+                        answers << toolResult(use.id(), SAME_AS_EARLIER, false)
+                        continue
+                    }
                     if (toolCallsRun >= spec.maxToolCalls) return finish(ec, pinnedTenantId, turnId, result, "BUDGET")
                     if (now() > deadline) return finish(ec, pinnedTenantId, turnId, result, "BUDGET")
                     Map done

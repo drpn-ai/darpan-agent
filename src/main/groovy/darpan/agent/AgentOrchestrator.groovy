@@ -62,7 +62,11 @@ class AgentOrchestrator {
     static final String DAILY_CAP_PROPERTY = "darpan.agent.dailyUsdCapPerTenant"
     static final BigDecimal DEFAULT_DAILY_CAP_USD = 25G
 
-    static final String DECLINE = "I can only help with this audit's findings, checks and rules."
+    static final String DECLINE = "That is outside what I can do here. I work on this tenant's audits: why a finding is open or closed, what a check or statement covers, and changes to their rules, exclusions, fix wording and causes. Ask about one of those."
+    /** The reply when a turn would otherwise end with nothing for the person: never an empty answer. */
+    static final String NOTHING_CAME_OUT = "I could not put an answer together this time; nothing was changed. Ask again, or name the finding, record or statement you mean."
+    /** Asked of the investigator once when an item needs an answer and its evidence came back without one. */
+    static final String ANSWER_MISSING = "Your evidence has no answer, and the person asked a question. Write the short answer from the evidence so far, citing ids; read again only what it lacks."
     static final String CLARIFY = "Which finding, record or statement do you mean?"
 
     static final Set<String> BRAIN_KINDS = (["CAUSE_FEEDBACK", "RULE_NEW", "RULE_CHANGE", "CORRECTION"] as Set<String>).asImmutable()
@@ -126,7 +130,7 @@ class AgentOrchestrator {
      */
     Map send(def ec, String conversationId, String auditId, String findingId, String text) {
         String state = availability.call(ec)
-        if (state != AgentSwitch.ON) return response(conversationId, state ?: AgentSwitch.AGENT_OFF, null)
+        if (state != AgentSwitch.ON) return response(conversationId, state ?: AgentSwitch.AGENT_OFF, unavailableReply(state))
 
         String pinned = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         String userId = ec.user.userId as String
@@ -259,6 +263,11 @@ class AgentOrchestrator {
             turn.facts = carried
         } else if (brain || answer) {
             Map found = investigate(turn, items, null, [])
+            // A question deserves an answer: one more request from the facts already found, before any reply goes out empty.
+            if (answer && !found.answer && !found.stopped) {
+                Map again = investigate(turn, items, ANSWER_MISSING, (List<Map>) found.facts)
+                found = again.stopped ? found : again
+            }
             evidence = [facts: found.facts]
             turn.facts = (List<Map>) found.facts
             if (answer && found.answer) turn.replyParts << (found.answer as String)
@@ -547,7 +556,13 @@ class AgentOrchestrator {
         if (blocked && turn.question == null) turn.question = [text: provenanceQuestion(blocked), options: [], from: "PROVENANCE"]
         String outcome = turn.outcome ?: (turn.question != null ? "QUESTION" : "DONE")
         if (outcome == "DONE" && turn.question != null) outcome = "QUESTION"
-        Map out = response(turn.conversationId, outcome, turn.replyParts.findAll { it }.join("\n\n") ?: null)
+        String reply = turn.replyParts.findAll { it }.join("\n\n") ?: null
+        // Never an empty answer: a turn that made nothing, asked nothing and says nothing tells the person so.
+        if (!reply && turn.question == null && !proposals && !turn.tickets) {
+            reply = outcome == "TENANT_CHANGED" ? TENANT_CHANGED_REPLY : NOTHING_CAME_OUT
+            if (outcome == "DONE") outcome = "INCOMPLETE"
+        }
+        Map out = response(turn.conversationId, outcome, reply)
         out.proposals = proposals
         out.tickets = new ArrayList<Map>(turn.tickets.values())
         out.question = turn.question
@@ -569,8 +584,28 @@ class AgentOrchestrator {
         return [conversationId: conversationId, outcome: outcome, reply: reply, proposals: [], tickets: [], question: null, masked: []]
     }
 
-    private static String stoppedReply(String outcome) {
-        return "I stopped before finishing (${outcome}); nothing was changed beyond what is listed.".toString()
+    static final String TENANT_CHANGED_REPLY = "You switched tenant while I was working, so I stopped; nothing was changed in the tenant you switched to."
+
+    /** Why a role stopped, in words; the code itself stays in the turn row for staff. */
+    static final Map<String, String> STOPPED_BECAUSE = [
+            BUDGET          : "I reached my limit of steps for one message",
+            LOOP            : "I kept asking for the same data",
+            MAX_TOKENS      : "my answer ran past its length limit",
+            REFUSED         : "the model declined to work on this message",
+            NO_ACCESS       : "your AI access changed while I was working",
+            INVALID_EVIDENCE: "I could not read back what I had found",
+            ERROR           : "something went wrong on our side"].asImmutable()
+
+    static String stoppedReply(String outcome) {
+        String why = STOPPED_BECAUSE[outcome] ?: "something went wrong on our side"
+        return "I stopped before finishing: ${why}. Nothing was changed beyond what is listed; ask again, or narrow the question.".toString()
+    }
+
+    /** What the person reads when the agent cannot run before the turn starts. */
+    static String unavailableReply(String state) {
+        if (state == AgentAvailability.AGENT_REFUSED) return "The agent is down for a fix on our side (its setup was refused by Claude); Darpan staff have been alerted. Nothing was changed."
+        return state == AgentSwitch.AGENT_UNAVAILABLE ? "The agent cannot reach Claude right now; try again in a few minutes. Nothing was changed." :
+                "The AI agent is off for this tenant; a Darpan admin can turn it on. Nothing was changed."
     }
 
     // ---------------------------------------------------------------- limits

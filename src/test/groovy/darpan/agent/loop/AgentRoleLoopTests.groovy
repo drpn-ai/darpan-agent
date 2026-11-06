@@ -250,7 +250,25 @@ class AgentRoleLoopTests {
         def loop = new CountingLoop()
         RoleResult r = run(investigator(), gateway, loop)
         assertEquals("LOOP", r.outcome)
-        assertEquals(2, loop.executor.invoked.size(), "the third identical call never runs")
+        assertEquals(1, loop.executor.invoked.size(), "a repeated read is answered from the turn, and the third never runs")
+    }
+
+    @Test
+    void "a read repeated in the same turn is answered from the earlier call, not run or written again, and the turn goes on"() {
+        def gateway = new ScriptedGateway([
+                msg("tool_use", [toolUse("tu_1", "search_knowledge", [words: "carrier"])]),
+                msg("tool_use", [toolUse("tu_2", "search_knowledge", [words: "carrier"])]),
+                msg("end_turn", [text("Answer from the first read.")])])
+        def loop = new CountingLoop()
+        RoleResult r = run(investigator(), gateway, loop)
+        assertEquals("DONE", r.outcome)
+        assertEquals(1, loop.executor.invoked.size(), "the service runs once")
+        List<Map> second = (List<Map>) wire(gateway.sent[2]).messages.last().content
+        assertEquals("tool_result", second[0].type)
+        assertEquals("tu_2", second[0].tool_use_id)
+        assertEquals(AgentRoleLoop.SAME_AS_EARLIER, second[0].content instanceof List ? second[0].content[0].text : second[0].content)
+        assertTrue(AgentToolExecutor.isReadTool("get_finding") && !AgentToolExecutor.isReadTool("propose_exclusion") &&
+                !AgentToolExecutor.isReadTool("raise_ticket") && !AgentToolExecutor.isReadTool("ask_human"))
     }
 
     @Test
@@ -557,8 +575,8 @@ class AgentRoleLoopTests {
         assertEquals([], tools.findAll { it.cache_control }, "no tool carries a cache marker")
         assertEquals([type: "ephemeral"], w.cache_control, "a role that sends more than one request caches its growing tail (automatic caching)")
         tools.each { Map t ->
-            // raise_ticket goes without strict so the author's strict tools stay within the API's optional-parameter limit.
-            assertEquals(t.name != "raise_ticket", t.strict ?: false, t.name as String)
+            // Each tool's strict flag is the catalog's (tools.json "strict": false keeps a role inside the API's grammar limits).
+            assertEquals(AgentToolExecutor.TOOLS[t.name as String].strict != false, t.strict ?: false, t.name as String)
             assertEquals(false, t.input_schema.additionalProperties, t.name as String)
         }
         assertEquals([type: "ephemeral"], ((List<Map>) w.system)[0].cache_control)

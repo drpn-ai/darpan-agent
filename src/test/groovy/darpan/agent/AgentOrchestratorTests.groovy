@@ -215,6 +215,25 @@ class AgentOrchestratorTests {
     // ------------------------------------------------------------------ tests
 
     @Test
+    void "a question whose evidence has no answer is asked once more, and a turn never ends saying nothing"() {
+        List<Map> facts = [fact("findingId", FINDING, "TOOL"), fact("state", "OPEN", "TOOL")]
+        def g = new AgentRoleLoopTests.ScriptedGateway([
+                router([item("EXPLAIN", "Why is this one open?", 0.9, [FINDING])]),
+                evidence(facts, ""),
+                evidence(facts, "${FINDING} is open: its state is OPEN.".toString())])
+        Map out = send(new AgentOrchestrator(g, AVAILABLE), "Why is this one open?")
+        assertEquals("DONE", out.outcome, out.toString())
+        assertEquals("${FINDING} is open: its state is OPEN.".toString(), out.reply)
+        assertTrue(sentJson(g, 2).contains(AgentOrchestrator.ANSWER_MISSING), "the second ask says what is missing")
+
+        def empty = new AgentRoleLoopTests.ScriptedGateway([
+                router([item("EXPLAIN", "Why is this one open?", 0.9, [FINDING])]), evidence(facts, ""), evidence(facts, "")])
+        Map silent = send(new AgentOrchestrator(empty, AVAILABLE), "Why is this one open?")
+        assertEquals("INCOMPLETE", silent.outcome)
+        assertEquals(AgentOrchestrator.NOTHING_CAME_OUT, silent.reply, "never an empty reply")
+    }
+
+    @Test
     void "a why-question runs router then investigator and returns a cited reply"() {
         def g = new AgentRoleLoopTests.ScriptedGateway([
                 router([item("EXPLAIN", "Why is this one open?", 0.9, [FINDING])]),

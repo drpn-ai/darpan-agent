@@ -4,6 +4,7 @@ import com.anthropic.core.ObjectMappers
 import com.anthropic.models.messages.Message
 import com.anthropic.models.messages.MessageCreateParams
 import darpan.agent.AgentAvailability
+import darpan.agent.AgentPreflight
 import darpan.agent.AgentOrchestrator
 import darpan.agent.AgentRedaction
 import darpan.agent.AgentSwitch
@@ -392,7 +393,11 @@ class AgentEvalRunner {
         Runtime.runtime.addShutdownHook(hook)
         Throwable stopped = null
         try {
-            runAll(cases, gatewayFor, availability, out, { Map c, Map r ->
+            // Every response is kept beside the report (responses.jsonl, one per request with its case and run), so a failed
+            // run can be replayed offline against a fix instead of paid for again.
+            File responses = new File(dir, "responses.jsonl")
+            Closure<ModelGateway> tapped = { Map c, int run -> new ResponseTap((ModelGateway) gatewayFor.call(c, run), responses, c.id as String, run) }
+            runAll(cases, tapped, availability, out, { Map c, Map r ->
                 jsonl.append(JsonOutput.toJson(runView(c.id as String, c.group as String, r)) + "\n", "UTF-8")
             })
         } catch (Throwable t) {
@@ -692,6 +697,26 @@ class AgentEvalRunner {
      * role: router items of the case's first expected kind; investigator one get_finding (or get_audit_settings) then
      * evidence; author one raise_ticket then a short reply. Usage is zero.
      */
+    /** Passes each request through and appends {caseId, run, model, response} to a file; a failed request is passed on as is. */
+    static class ResponseTap implements ModelGateway {
+        final ModelGateway inner
+        final File file
+        final String caseId
+        final int run
+        ResponseTap(ModelGateway inner, File file, String caseId, int run) { this.inner = inner; this.file = file; this.caseId = caseId; this.run = run }
+        @Override
+        Message send(MessageCreateParams params) { return record(params, inner.send(params)) }
+        @Override
+        Message send(MessageCreateParams params, java.time.Duration timeout) { return record(params, inner.send(params, timeout)) }
+        private Message record(MessageCreateParams params, Message m) {
+            synchronized (file) {
+                file << JsonOutput.toJson([caseId: caseId, run: run, model: params.model().asString(),
+                        response: new JsonSlurper().parseText(MAPPER.writeValueAsString(m))]) << "\n"
+            }
+            return m
+        }
+    }
+
     static class RecordingGateway implements ModelGateway {
         final List<Map> requests = []
         final Map evalCase
@@ -855,7 +880,9 @@ class AgentEvalRunner {
             runner.actAs()
             String state = AgentAvailability.state(ec)
             if (state != AgentSwitch.ON) {
-                out.println("[agent-eval] not run: the agent reads ${state} in this JVM (is ANTHROPIC_API_KEY exported in the shell that runs Gradle?)".toString())
+                out.println((state == AgentAvailability.AGENT_REFUSED ?
+                        "[agent-eval] not run: the Claude API refused a role's request shape, nothing else was sent: ${AgentPreflight.refusal(AnthropicModelGateway.perRequest(ec))}" :
+                        "[agent-eval] not run: the agent reads ${state} in this JVM (is ANTHROPIC_API_KEY exported in the shell that runs Gradle?)").toString())
                 return 1
             }
             ModelGateway gateway = realGateway(ec)

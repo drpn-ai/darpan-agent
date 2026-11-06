@@ -1,6 +1,7 @@
 [
   {
     "name": "get_finding",
+    "read": true,
     "service": "facade.AgentReadFacadeServices.get#AgentFinding",
     "description": "Reads one audit finding of the active tenant by its id (for example F-20761): its statement, check, record key, state, conclusion and the facts the check recorded, and the run its check reads with the system on each side (run.sides.FILE_1, FILE_2).",
     "input_schema": {
@@ -14,6 +15,7 @@
   },
   {
     "name": "find_lookalikes",
+    "read": true,
     "service": "facade.AgentReadFacadeServices.find#AuditFindingLookalikes",
     "description": "Lists findings of the same check with the same conclusion (sameCause) and with a different one (controls), so a rule can be checked against both before it is proposed.",
     "input_schema": {
@@ -28,6 +30,7 @@
   },
   {
     "name": "inspect_record",
+    "read": true,
     "service": "facade.AgentReadFacadeServices.inspect#AgentRecord",
     "description": "Reads one record from a connected system by key, through a catalog read that returns only status, type, date, amount, id and SKU fields.",
     "input_schema": {
@@ -42,6 +45,7 @@
   },
   {
     "name": "search_knowledge",
+    "read": true,
     "service": "facade.AgentReadFacadeServices.search#AgentKnowledge",
     "description": "Searches the knowledge base (product facts and the active tenant's own) for entries that match the words.",
     "input_schema": {
@@ -56,6 +60,7 @@
   },
   {
     "name": "get_audit_settings",
+    "read": true,
     "service": "facade.AuditFacadeServices.get#AuditSettings",
     "description": "Reads an audit's settings: its name, schedule, and each statement with its checks and the run each check reads.",
     "input_schema": {

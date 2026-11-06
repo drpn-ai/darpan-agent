@@ -336,6 +336,9 @@ class AgentToolExecutor {
     /** A proposal tool: one flat, strict tool per proposal kind, all mapping to create#AuditChangeProposal. */
     static boolean isProposalTool(String name) { return TOOLS[name]?.proposal != null }
 
+    /** A tool that only reads (tools.json "read": true): repeating it with the same input in a turn reads the same thing. */
+    static boolean isReadTool(String name) { return TOOLS[name]?.read == true }
+
     /**
      * The proposal service's input from a proposal tool's flat input: {kind, target, after, reasonText, evidence}, target and
      * after picked by the catalog entry's key lists. An empty string or list is "not given" (every field of a proposal tool is
