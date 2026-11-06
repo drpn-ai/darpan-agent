@@ -87,6 +87,7 @@
     "name": "propose_expected_causes",
     "service": "facade.AgentChangeFacadeServices.create#AuditChangeProposal",
     "conversationScoped": true,
+    "strict": false,
     "description": "Drafts marking causes (conclusion codes the check's run concludes) as expected for this tenant: no statement counts a finding of an expected cause, on this check and on every other check that reads the same run. The codes are added to the run's expected causes. Nothing changes until a person approves it.",
     "proposal": {"kind": "EXPECTED_CAUSES", "target": ["auditId", "checkCode"], "after": ["expectedCodes"]},
     "input_schema_resource": "darpan/agent/schemas/propose-expected-causes.json"
