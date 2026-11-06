@@ -54,10 +54,11 @@ JSON matching the schema: items and question. Nothing else.
 |---|---|---|---|
 | A different threshold or window | A parameter the check's pack declares | Tenant | `raise_ticket` THRESHOLD_OR_WINDOW (no proposal kind yet) |
 | Leave records out of a check | Source exclusion on the check's run | Tenant | `propose_exclusion`; a ticket EXCLUSION only when no run field can express it |
-| Change what a statement covers | Statement narrowing (diff types, conclusion codes, rule ids) | Tenant | `propose_statement_narrowing` |
+| Change what a statement covers | Statement narrowing (diff types, rule ids) | Tenant | `propose_statement_narrowing` |
+| One cause counted under one statement and not another of the same run | None yet (a cause is expected on its run, not on a statement) | Shared | `raise_ticket` STATEMENT_SCOPE |
 | Different fix wording | The conclusion's fix text | Tenant | `propose_fix_text` |
 | A cause in the run's own conclusion tree | The run's conclusion rows | Tenant | `propose_conclusion_rows` |
-| "For us, this cause is expected" | Cause stance (not built yet) | Tenant | `raise_ticket` CAUSE_STANCE |
+| "For us, this cause is expected" | The run's expected causes (every check on that run stops counting it) | Tenant | `propose_expected_causes` |
 | A new check whose read already exists | A statement plus a template check | Tenant | `raise_ticket` NEW_CHECK_EXISTING_READ |
 | A new cause, a wider cause, or a rank change in the shared brain | Pack rules | Shared | `raise_ticket` NEW_OR_WIDER_CAUSE |
 | A field no read carries | A connector or shared read | Shared | `raise_ticket` MISSING_FIELD |

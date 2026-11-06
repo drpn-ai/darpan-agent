@@ -34,7 +34,7 @@ class AgentToolSchemaLimitTests {
 
     @Test
     void "the author's strict tools have no optional parameters and no unions"() {
-        assertEquals([tools: 6, optional: 0, unions: 0], AgentToolExecutor.strictCounts(RoleSpec.author().tools, null))
+        assertEquals([tools: 7, optional: 0, unions: 0], AgentToolExecutor.strictCounts(RoleSpec.author().tools, null))
     }
 
     @Test
@@ -50,8 +50,27 @@ class AgentToolSchemaLimitTests {
     @Test
     void "every proposal tool is strict and raise_ticket is sent without strict"() {
         Map<String, Boolean> strict = AgentToolExecutor.toolDefinitions(RoleSpec.author().tools).collectEntries { [(it.name()): it.strict().orElse(false)] }
-        assertEquals([ask_human: true, propose_conclusion_rows: true, propose_exclusion: true, propose_fix_text: true,
-                      propose_statement_narrowing: true, raise_ticket: false, request_more_evidence: true], strict)
+        assertEquals([ask_human: true, propose_conclusion_rows: true, propose_exclusion: true, propose_expected_causes: true,
+                      propose_fix_text: true, propose_statement_narrowing: true, raise_ticket: false, request_more_evidence: true], strict)
+    }
+
+    @Test
+    void "the author's model follows its system property, and only a model the ledger prices is taken"() {
+        String was = System.getProperty(RoleSpec.AUTHOR_MODEL_PROPERTY)
+        try {
+            System.clearProperty(RoleSpec.AUTHOR_MODEL_PROPERTY)
+            assertEquals("claude-opus-5-5", RoleSpec.author().model)
+            System.setProperty(RoleSpec.AUTHOR_MODEL_PROPERTY, " claude-sonnet-5-5 ")
+            RoleSpec sonnet = RoleSpec.author()
+            assertEquals("claude-sonnet-5-5", sonnet.model)
+            assertTrue(sonnet.adaptiveThinking(), "a Sonnet author still thinks")
+            assertEquals("HIGH", sonnet.effort)
+            System.setProperty(RoleSpec.AUTHOR_MODEL_PROPERTY, "claude-unknown-9")
+            Exception e = assertThrows(IllegalArgumentException) { RoleSpec.author() }
+            assertTrue(e.message.contains("claude-unknown-9"), e.message)
+        } finally {
+            if (was == null) System.clearProperty(RoleSpec.AUTHOR_MODEL_PROPERTY) else System.setProperty(RoleSpec.AUTHOR_MODEL_PROPERTY, was)
+        }
     }
 
     @Test

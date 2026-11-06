@@ -89,6 +89,8 @@ tasks.register('agentEval', JavaExec) {
     systemProperty 'darpan.agent.evalReportDir', layout.buildDirectory.dir('agent-eval').get().asFile.absolutePath
     if (project.hasProperty('agentEvalBudgetUsd')) systemProperty 'darpan.agent.evalBudgetUsd', project.property('agentEvalBudgetUsd').toString()
     if (project.hasProperty('agentEvalCases')) systemProperty 'darpan.agent.evalCases', project.property('agentEvalCases').toString()
+    // -PagentAuthorModel=claude-sonnet-5-5 runs the author on another priced model (RoleSpec.AUTHOR_MODEL_PROPERTY), to compare.
+    if (project.hasProperty('agentAuthorModel')) systemProperty 'darpan.agent.authorModel', project.property('agentAuthorModel').toString()
     outputs.upToDateWhen { false }
 }
 

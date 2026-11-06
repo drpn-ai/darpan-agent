@@ -65,9 +65,23 @@ final class RoleSpec {
                 maxRequests: 12, maxToolCalls: 30, wallClockMs: 90_000L, maxTokens: 16_000L)
     }
 
+    /** The author's model when set (a system property, so the eval and a deployment can compare or switch); Opus otherwise. */
+    static final String AUTHOR_MODEL_PROPERTY = "darpan.agent.authorModel"
+    static final String DEFAULT_AUTHOR_MODEL = "claude-opus-5-5"
+
+    /** The author's model: the property's when it is one the usage ledger prices (else refused, never billed at a guess). */
+    static String authorModel() {
+        String set = System.getProperty(AUTHOR_MODEL_PROPERTY)?.trim()
+        if (!set) return DEFAULT_AUTHOR_MODEL
+        if (!AgentUsageLedger.PRICES.containsKey(set)) {
+            throw new IllegalArgumentException("${AUTHOR_MODEL_PROPERTY} is ${set}, which has no price; use one of ${AgentUsageLedger.PRICES.keySet().join(', ')}".toString())
+        }
+        return set
+    }
+
     static RoleSpec author() {
-        return new RoleSpec(role: AUTHOR, model: "claude-opus-5-5", effort: "HIGH", systemPromptPath: "darpan/agent/prompts/author.md",
-                tools: ["propose_exclusion", "propose_statement_narrowing", "propose_fix_text", "propose_conclusion_rows", "raise_ticket",
+        return new RoleSpec(role: AUTHOR, model: authorModel(), effort: "HIGH", systemPromptPath: "darpan/agent/prompts/author.md",
+                tools: ["propose_exclusion", "propose_statement_narrowing", "propose_expected_causes", "propose_fix_text", "propose_conclusion_rows", "raise_ticket",
                         "ask_human", "request_more_evidence"],
                 maxRequests: 8, maxToolCalls: 6, wallClockMs: 120_000L, maxTokens: 32_000L)
     }

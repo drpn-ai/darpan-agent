@@ -79,9 +79,17 @@
     "name": "propose_statement_narrowing",
     "service": "facade.AgentChangeFacadeServices.create#AuditChangeProposal",
     "conversationScoped": true,
-    "description": "Drafts narrowing what a statement covers on one check: the diff types, conclusion codes or rule ids it keeps. Nothing changes until a person approves it. Every record id in it must be one the person typed, the open finding's own, or already in the config; any other id blocks the draft. An empty string or list means not given.",
-    "proposal": {"kind": "STATEMENT_NARROWING", "target": ["auditId", "checkCode", "statementCode"], "after": ["diffTypes", "conclusionCodes", "ruleIds"]},
+    "description": "Drafts narrowing what a statement covers on one check: the diff types or rule ids it keeps. Which causes count is not set here: an expected cause is the run's (propose_expected_causes). Nothing changes until a person approves it. Every record id in it must be one the person typed, the open finding's own, or already in the config; any other id blocks the draft. An empty string or list means not given.",
+    "proposal": {"kind": "STATEMENT_NARROWING", "target": ["auditId", "checkCode", "statementCode"], "after": ["diffTypes", "ruleIds"]},
     "input_schema_resource": "darpan/agent/schemas/propose-statement-narrowing.json"
+  },
+  {
+    "name": "propose_expected_causes",
+    "service": "facade.AgentChangeFacadeServices.create#AuditChangeProposal",
+    "conversationScoped": true,
+    "description": "Drafts marking causes (conclusion codes the check's run concludes) as expected for this tenant: no statement counts a finding of an expected cause, on this check and on every other check that reads the same run. The codes are added to the run's expected causes. Nothing changes until a person approves it.",
+    "proposal": {"kind": "EXPECTED_CAUSES", "target": ["auditId", "checkCode"], "after": ["expectedCodes"]},
+    "input_schema_resource": "darpan/agent/schemas/propose-expected-causes.json"
   },
   {
     "name": "propose_fix_text",

@@ -1,0 +1,38 @@
+{
+  "id": "lever-04",
+  "about": "A cause stance that is a tenant lever: a cause the tenant treats as expected on the check's run (expected causes).",
+  "userText": "the store keeping the item is normal for us, the store settles those memos itself. stop counting them as findings",
+  "openFindingId": "F-900852",
+  "fixtures": [
+    "world.json",
+    "findings.json"
+  ],
+  "expect": {
+    "routerKinds": [
+      "CAUSE_FEEDBACK",
+      "RULE_CHANGE"
+    ],
+    "outcome": "PROPOSAL",
+    "proposalKind": "EXPECTED_CAUSES",
+    "provenance": "PASS",
+    "mustNotContainIds": [],
+    "proposalMatch": {
+      "target": {
+        "auditId": {
+          "oneOf": [
+            "$AUDIT_ID",
+            "$AUDIT_CODE"
+          ]
+        },
+        "checkCode": "credits-open"
+      },
+      "after": {
+        "expectedCodes": {
+          "equals": [
+            "CONC_EVAL_STORE"
+          ]
+        }
+      }
+    }
+  }
+}

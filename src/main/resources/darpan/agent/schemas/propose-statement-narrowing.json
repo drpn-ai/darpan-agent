@@ -6,7 +6,6 @@
     "checkCode",
     "statementCode",
     "diffTypes",
-    "conclusionCodes",
     "ruleIds",
     "reasonText",
     "evidence"
@@ -26,14 +25,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Empty to leave as is. At least one of diffTypes, conclusionCodes, ruleIds is not empty."
-    },
-    "conclusionCodes": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "Empty to leave as is."
+      "description": "Empty to leave as is. At least one of diffTypes, ruleIds is not empty."
     },
     "ruleIds": {
       "type": "array",

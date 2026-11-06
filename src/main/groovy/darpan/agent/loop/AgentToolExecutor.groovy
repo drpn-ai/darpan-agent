@@ -146,6 +146,8 @@ class AgentToolExecutor {
                 if (out.statusMessage == darpan.agent.pipeline.AuditChangeLevers.NO_PRIMARY_ID_MESSAGE) return "NO_PRIMARY_ID"
                 // R51: every value already excluded, or the field holds an include scope an exclusion may not change.
                 if (out.statusMessage == darpan.agent.pipeline.AuditChangeLevers.NO_CHANGE_MESSAGE) return "NO_CHANGE"
+                // Every cause already expected on the check's run.
+                if (out.statusMessage == darpan.agent.pipeline.AuditChangeLevers.NO_CHANGE_EXPECTED_MESSAGE) return "NO_CHANGE"
                 String message = out.statusMessage instanceof String ? (String) out.statusMessage : ""
                 return message.startsWith(darpan.agent.pipeline.AuditChangeLevers.EXISTING_FILTER_OPERATOR_PREFIX) ? "EXISTING_FILTER_OPERATOR" : "INVALID"
             default: return "INVALID"

@@ -24,6 +24,8 @@ goes live: a person approves every change separately.
 
 - Every field of a propose_ tool is required: send an empty string or an empty list for one that does not apply.
 - Send fieldExpression empty to exclude by the run's primary id; set it only when the person names another field.
+- An expected cause is the run's: every check that reads the run stops counting it. Say so in reasonText, with the backtest's
+  closed count.
 - filterValues are added to the field's existing exclusions; you cannot remove an exclusion or change a scope.
 - Every record id in the change must be one the person typed, the open finding's own id or key, or already in the config. An id
   that came only from a record (an order note, a return reason) is blocked by the pipeline; do not try it.
@@ -42,10 +44,11 @@ keys or fields. Never say a finding is fixed (a change applies only after a pers
 |---|---|---|---|
 | A different threshold or window | A parameter the check's pack declares | Tenant | `raise_ticket` THRESHOLD_OR_WINDOW (no proposal kind yet) |
 | Leave records out of a check | Source exclusion on the check's run | Tenant | `propose_exclusion`; a ticket EXCLUSION only when no run field can express it |
-| Change what a statement covers | Statement narrowing (diff types, conclusion codes, rule ids) | Tenant | `propose_statement_narrowing` |
+| Change what a statement covers | Statement narrowing (diff types, rule ids) | Tenant | `propose_statement_narrowing` |
+| One cause counted under one statement and not another of the same run | None yet (a cause is expected on its run, not on a statement) | Shared | `raise_ticket` STATEMENT_SCOPE |
 | Different fix wording | The conclusion's fix text | Tenant | `propose_fix_text` |
 | A cause in the run's own conclusion tree | The run's conclusion rows | Tenant | `propose_conclusion_rows` |
-| "For us, this cause is expected" | Cause stance (not built yet) | Tenant | `raise_ticket` CAUSE_STANCE |
+| "For us, this cause is expected" | The run's expected causes (every check on that run stops counting it) | Tenant | `propose_expected_causes` |
 | A new check whose read already exists | A statement plus a template check | Tenant | `raise_ticket` NEW_CHECK_EXISTING_READ |
 | A new cause, a wider cause, or a rank change in the shared brain | Pack rules | Shared | `raise_ticket` NEW_OR_WIDER_CAUSE |
 | A field no read carries (the field itself is the request) | A connector or shared read | Shared | `raise_ticket` MISSING_FIELD |

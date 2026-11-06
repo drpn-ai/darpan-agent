@@ -1,0 +1,58 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "auditId",
+    "checkCode",
+    "expectedCodes",
+    "reasonText",
+    "evidence"
+  ],
+  "properties": {
+    "auditId": {
+      "type": "string"
+    },
+    "checkCode": {
+      "type": "string"
+    },
+    "expectedCodes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Conclusion codes the check's run concludes, to add to its expected causes; at least one."
+    },
+    "reasonText": {
+      "type": "string",
+      "description": "Why, citing finding ids, record keys or fields; at most 1000 characters."
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field",
+          "value",
+          "source"
+        ],
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "HUMAN",
+              "CONFIG",
+              "TOOL"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

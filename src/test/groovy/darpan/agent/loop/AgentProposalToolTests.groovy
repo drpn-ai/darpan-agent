@@ -31,12 +31,22 @@ class AgentProposalToolTests {
     }
 
     @Test
-    void "a narrowing keeps only its non-empty lists"() {
+    void "a narrowing keeps only its non-empty lists, and names no causes (DAR-BE-196)"() {
         Map p = proposal("propose_statement_narrowing", [auditId: "A1", checkCode: "C1", statementCode: "R1", diffTypes: [],
-                                                         conclusionCodes: ["VOIDED"], ruleIds: [], reasonText: "x", evidence: []])
+                                                         ruleIds: ["RULE_7"], reasonText: "x", evidence: []])
         assertEquals("STATEMENT_NARROWING", p.kind)
         assertEquals([auditId: "A1", checkCode: "C1", statementCode: "R1"], p.target)
-        assertEquals([conclusionCodes: ["VOIDED"]], p.after)
+        assertEquals([ruleIds: ["RULE_7"]], p.after)
+        Map schema = (Map) ((Map) AgentToolExecutor.TOOLS["propose_statement_narrowing"]).get("input_schema")
+        assertTrue(((Map) schema.get("properties")).containsKey("ruleIds"), "the schema is the one read")
+        assertFalse(((Map) schema.get("properties")).containsKey("conclusionCodes"))
+    }
+
+    @Test
+    void "expected causes map whole to the check's run"() {
+        Map p = proposal("propose_expected_causes", [auditId: "A1", checkCode: "C1", expectedCodes: ["VOIDED"], reasonText: "x", evidence: []])
+        assertEquals([kind: "EXPECTED_CAUSES", target: [auditId: "A1", checkCode: "C1"], after: [expectedCodes: ["VOIDED"]],
+                      reasonText: "x", evidence: []], p)
     }
 
     @Test
@@ -70,7 +80,8 @@ class AgentProposalToolTests {
     @Test
     void "every proposal tool maps to the one proposal service and is read by the author as a proposal"() {
         List<String> tools = AgentToolExecutor.TOOLS.findAll { k, v -> v.proposal != null }.keySet() as List
-        assertEquals(["propose_conclusion_rows", "propose_exclusion", "propose_fix_text", "propose_statement_narrowing"], tools.sort())
+        assertEquals(["propose_conclusion_rows", "propose_exclusion", "propose_expected_causes", "propose_fix_text",
+                      "propose_statement_narrowing"], tools.sort())
         tools.each { String t ->
             assertEquals("facade.AgentChangeFacadeServices.create#AuditChangeProposal", AgentToolExecutor.serviceOf(t), t)
             assertTrue(AgentToolExecutor.isProposalTool(t), t)

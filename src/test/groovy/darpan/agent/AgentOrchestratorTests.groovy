@@ -392,6 +392,7 @@ class AgentOrchestratorTests {
                 statusMessage: darpan.agent.pipeline.AuditChangeLevers.NO_PRIMARY_ID_MESSAGE, provenanceStatus: "PASS", blockedIds: []]))
         assertEquals("NO_PRIMARY_ID", ((Map) new JsonSlurper().parseText(noKey)).statusCode, "R44: no single primary id to exclude by")
         [(darpan.agent.pipeline.AuditChangeLevers.NO_CHANGE_MESSAGE): "NO_CHANGE",
+         (darpan.agent.pipeline.AuditChangeLevers.NO_CHANGE_EXPECTED_MESSAGE): "NO_CHANGE",
          (darpan.agent.pipeline.AuditChangeLevers.EXISTING_FILTER_OPERATOR_PREFIX + "this run side already filters x with INCLUDE_IN"): "EXISTING_FILTER_OPERATOR",
          ("SYSTEM " + darpan.agent.pipeline.AuditChangeLevers.EXISTING_FILTER_OPERATOR_PREFIX): "INVALID"].each { String message, String code ->
             String view = darpan.agent.loop.AgentToolExecutor.authorView("propose_exclusion", false, JsonOutput.toJson([proposalId: "100003",

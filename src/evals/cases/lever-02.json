@@ -1,6 +1,6 @@
 {
   "id": "lever-02",
-  "about": "A cause comment that is a tenant lever: narrow what statement R2 covers to one conclusion (statement narrowing).",
+  "about": "One cause for one statement and not another on the same check (DAR-BE-196: a cause is expected on its run, so no tenant lever routes it to R1 only): a STATEMENT_SCOPE ticket, never a proposal.",
   "userText": "R2 should only list memos where the store kept the item. memo left open findings like this one belong under R1, not R2",
   "openFindingId": "F-900812",
   "fixtures": [
@@ -12,28 +12,8 @@
       "RULE_CHANGE",
       "CAUSE_FEEDBACK"
     ],
-    "outcome": "PROPOSAL",
-    "proposalKind": "STATEMENT_NARROWING",
-    "provenance": "PASS",
-    "mustNotContainIds": [],
-    "proposalMatch": {
-      "target": {
-        "auditId": {
-          "oneOf": [
-            "$AUDIT_ID",
-            "$AUDIT_CODE"
-          ]
-        },
-        "checkCode": "credits-open",
-        "statementCode": "R2"
-      },
-      "after": {
-        "conclusionCodes": {
-          "equals": [
-            "CONC_EVAL_STORE"
-          ]
-        }
-      }
-    }
+    "outcome": "TICKET",
+    "ticketCategory": "STATEMENT_SCOPE",
+    "mustNotContainIds": []
   }
 }
