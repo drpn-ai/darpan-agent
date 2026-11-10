@@ -18,6 +18,8 @@ import com.anthropic.models.messages.OutputConfig
 import com.anthropic.models.messages.StopReason
 import com.anthropic.models.messages.TextBlockParam
 import com.anthropic.models.messages.ThinkingConfigAdaptive
+import com.anthropic.models.messages.ToolChoice
+import com.anthropic.models.messages.ToolChoiceNone
 import com.anthropic.models.messages.ToolResultBlockParam
 import com.anthropic.models.messages.ToolUnion
 import com.anthropic.models.messages.ToolUseBlock
@@ -67,6 +69,11 @@ class AgentRoleLoop {
      * so the service is not run again and the same result is not paid for (or cached) twice.
      */
     static final String SAME_AS_EARLIER = "SAME_AS_EARLIER: you made this exact call earlier in this turn; its result is above and has not changed. Work from it."
+    /**
+     * Sent with the first repeated read: the investigator is going round, so it answers now. If it calls a tool anyway, its
+     * next request goes with tool_choice none, which guarantees text (eval 2026-11-10: why-01 re-read its finding to the guard).
+     */
+    static final String REPEAT_NOTICE = "You are repeating a read you already have, so no more tool calls will run. Return the evidence JSON now from what you have read, and say in it what you could not see."
     static final String LAST_REQUEST_NOTICE = "This is your last request: no tool you call now will run. Return the evidence JSON now from what you have read, and say in it what you could not check."
     /** Retries of one request, each only before any streamed byte and inside the deadline. */
     static final int MAX_RETRIES = 2
@@ -145,6 +152,8 @@ class AgentRoleLoop {
         long deadline = now() + spec.wallClockMs
         Map<String, Integer> seen = [:]
         int toolCallsRun = 0
+        boolean answerNow = false      // the investigator repeated a read: it was told to answer
+        boolean forceText = false      // and called a tool anyway: the next request sends tool_choice none
 
         while (true) {
             // The cap is enforced before each request: with too little left, none is sent.
@@ -155,7 +164,7 @@ class AgentRoleLoop {
 
             Message response
             try {
-                response = sendWithRetries(gateway, buildParams(spec, result.messages), deadline)
+                response = sendWithRetries(gateway, buildParams(spec, result.messages, forceText), deadline)
             } catch (StreamInterruptedException e) {
                 // Billed: the stream had started. What it reported counts toward the turn and the tenant's daily cap.
                 if (e.usage != null) {
@@ -183,6 +192,17 @@ class AgentRoleLoop {
                 result.messages.add(response.toParam())
                 List<ContentBlockParam> answers = []
                 Map control = null
+                if (answerNow) {
+                    // Told to answer and still calling tools: nothing runs, and the next request cannot call one.
+                    if (forceText) return finish(ec, pinnedTenantId, turnId, result, "LOOP")
+                    response.content().findAll { it.isToolUse() }.each { ContentBlock b ->
+                        answers << toolResult(b.asToolUse().id(), "NOT_RUN: answer now from what you have read", true)
+                    }
+                    forceText = true
+                    result.messages.add(MessageParam.ofUserOfContentBlockParams(answers))
+                    continue
+                }
+                boolean repeated = false
                 for (ContentBlock block : response.content()) {
                     if (!block.isToolUse()) continue
                     ToolUseBlock use = block.asToolUse()
@@ -199,6 +219,7 @@ class AgentRoleLoop {
                     if (times > 1 && AgentToolExecutor.isReadTool(use.name())) {
                         seen[key] = times
                         answers << toolResult(use.id(), SAME_AS_EARLIER, false)
+                        repeated = true
                         continue
                     }
                     if (toolCallsRun >= spec.maxToolCalls) return finish(ec, pinnedTenantId, turnId, result, "BUDGET")
@@ -227,8 +248,12 @@ class AgentRoleLoop {
                     result.pendingToolResults = answers
                     return finish(ec, pinnedTenantId, turnId, result, control.outcome as String)
                 }
-                if (spec.role == RoleSpec.INVESTIGATOR && result.requestCount + 1 >= spec.maxRequests)
+                if (spec.role == RoleSpec.INVESTIGATOR && repeated) {
+                    answerNow = true
+                    answers << ContentBlockParam.ofText(TextBlockParam.builder().text(REPEAT_NOTICE).build())
+                } else if (spec.role == RoleSpec.INVESTIGATOR && result.requestCount + 1 >= spec.maxRequests) {
                     answers << ContentBlockParam.ofText(TextBlockParam.builder().text(LAST_REQUEST_NOTICE).build())
+                }
                 result.messages.add(MessageParam.ofUserOfContentBlockParams(answers))
                 continue
             }
@@ -261,7 +286,7 @@ class AgentRoleLoop {
      * and never read. Explicit markers stay at most 3 (system, plus the author's brain catalog), so with this one the
      * request is within the API's 4.
      */
-    static MessageCreateParams buildParams(RoleSpec spec, List<MessageParam> messages) {
+    static MessageCreateParams buildParams(RoleSpec spec, List<MessageParam> messages, boolean noTools = false) {
         MessageCreateParams.Builder b = MessageCreateParams.builder()
                 .model(spec.model)
                 .maxTokens(spec.maxTokens)
@@ -269,6 +294,8 @@ class AgentRoleLoop {
                         .cacheControl(CacheControlEphemeral.builder().build()).build()])
                 .messages(messages)
         if (spec.tools) b.tools(AgentToolExecutor.toolDefinitions(spec.tools).collect { ToolUnion.ofTool(it) })
+        // The tools stay listed (the cached prefix is unchanged); the model cannot call one on this request.
+        if (spec.tools && noTools) b.toolChoice(ToolChoice.ofNone(ToolChoiceNone.builder().build()))
         if (spec.maxRequests > 1) b.cacheControl(CacheControlEphemeral.builder().build())
         if (spec.adaptiveThinking()) b.thinking(ThinkingConfigAdaptive.builder().build())
         Map output = [effort: spec.effort.toLowerCase(Locale.ROOT)]

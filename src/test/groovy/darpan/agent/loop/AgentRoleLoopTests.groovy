@@ -241,16 +241,35 @@ class AgentRoleLoopTests {
     }
 
     @Test
-    void "the same call three times ends LOOP"() {
+    void "an investigator that keeps calling after a repeat is answered NOT_RUN, then sent tool_choice none, and only then ends LOOP"() {
         Map same = [words: "carrier"]
         def gateway = new ScriptedGateway([
                 msg("tool_use", [toolUse("tu_1", "search_knowledge", same)]),
                 msg("tool_use", [toolUse("tu_2", "search_knowledge", same)]),
-                msg("tool_use", [toolUse("tu_3", "search_knowledge", [words: "carrier"])])])
+                msg("tool_use", [toolUse("tu_3", "get_finding", [findingId: "F-1"])]),
+                msg("tool_use", [toolUse("tu_4", "get_finding", [findingId: "F-1"])])])
         def loop = new CountingLoop()
         RoleResult r = run(investigator(), gateway, loop)
         assertEquals("LOOP", r.outcome)
-        assertEquals(1, loop.executor.invoked.size(), "a repeated read is answered from the turn, and the third never runs")
+        assertEquals(1, loop.executor.invoked.size(), "only the first read ran")
+        assertNull(wire(gateway.sent[2]).tool_choice, "told to answer, still free to choose")
+        assertEquals([type: "none"], wire(gateway.sent[3]).tool_choice, "after calling anyway, the request cannot call a tool")
+    }
+
+    @Test
+    void "a repeated read tells the investigator to answer now, and tool_choice none gets the answer when it calls anyway"() {
+        def gateway = new ScriptedGateway([
+                msg("tool_use", [toolUse("tu_1", "get_finding", [findingId: "F-1"])]),
+                msg("tool_use", [toolUse("tu_2", "get_finding", [findingId: "F-1"])]),
+                msg("tool_use", [toolUse("tu_3", "get_finding", [findingId: "F-1"])]),
+                msg("end_turn", [text('{"facts":[],"answer":"F-1 is open."}')])])
+        RoleResult r = run(investigator(), gateway)
+        assertEquals("DONE", r.outcome)
+        List<Map> afterRepeat = (List<Map>) wire(gateway.sent[2]).messages.last().content
+        assertEquals(["tool_result", "text"], afterRepeat*.type)
+        assertEquals(AgentRoleLoop.REPEAT_NOTICE, afterRepeat[1].text)
+        assertEquals([type: "none"], wire(gateway.sent[3]).tool_choice)
+        assertEquals("tool_result", ((List<Map>) wire(gateway.sent[3]).messages.last().content)[0].type, "each call still gets its result")
     }
 
     @Test
