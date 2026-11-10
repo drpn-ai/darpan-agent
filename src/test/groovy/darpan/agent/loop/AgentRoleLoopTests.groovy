@@ -580,7 +580,7 @@ class AgentRoleLoopTests {
             assertEquals(false, t.input_schema.additionalProperties, t.name as String)
         }
         assertEquals([type: "ephemeral"], ((List<Map>) w.system)[0].cache_control)
-        assertEquals("claude-opus-5-5", w.model)
+        assertEquals("claude-sonnet-5-5", w.model)
         assertEquals([type: "adaptive"], w.thinking)
         assertEquals("high", w.output_config.effort)
         assertNull(w.tool_choice, "tool_choice stays auto")

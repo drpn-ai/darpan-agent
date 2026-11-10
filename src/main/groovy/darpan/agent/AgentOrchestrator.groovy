@@ -274,7 +274,7 @@ class AgentOrchestrator {
             // With brain items the author goes on with what was found; it can ask for more evidence itself.
             if (found.stopped && !brain) { turn.outcome = "INCOMPLETE"; turn.replyParts << stoppedReply(found.stopped as String); return }
         }
-        if (brain) author(turn, items, evidence, RoleSpec.author())
+        if (brain) authorWithEscalation(turn, items, evidence)
         else if (items.any { it.kind in TICKET_KINDS }) author(turn, items.findAll { it.kind in TICKET_KINDS }, null, RoleSpec.author().copy(tools: ["raise_ticket"]))
     }
 
@@ -380,6 +380,22 @@ class AgentOrchestrator {
     }
 
     // ---------------------------------------------------------------- author
+
+    /**
+     * The author on its default model; when it would end the turn on a question to the person and drafted nothing, the same
+     * turn is written again on the escalation model first, and only that one's question (if it still asks) goes out.
+     * Eval 2026-11-10: on a new shared cause Sonnet asked in 2 of 3 runs where Opus raised the ticket every time.
+     */
+    private void authorWithEscalation(Turn turn, List<Map> items, Map evidence) {
+        int made = turn.proposals.size() + turn.tickets.size()
+        author(turn, items, evidence, RoleSpec.author())
+        RoleSpec stronger = RoleSpec.escalationAuthor()
+        boolean doubtful = turn.outcome == null && turn.question?.from == RoleSpec.AUTHOR && turn.proposals.size() + turn.tickets.size() == made
+        if (!doubtful || stronger == null) return
+        turn.question = null
+        Map latest = turn.facts != null ? [facts: turn.facts, carried: evidence?.carried] : evidence
+        author(turn, items, latest, stronger)
+    }
 
     private void author(Turn turn, List<Map> items, Map evidence, RoleSpec spec) {
         List<ContentBlockParam> blocks = []

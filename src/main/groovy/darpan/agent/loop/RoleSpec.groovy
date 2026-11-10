@@ -65,16 +65,33 @@ final class RoleSpec {
                 maxRequests: 12, maxToolCalls: 30, wallClockMs: 90_000L, maxTokens: 16_000L)
     }
 
-    /** The author's model when set (a system property, so the eval and a deployment can compare or switch); Opus otherwise. */
+    /**
+     * The author's model when set (a system property, so the eval and a deployment can compare or switch); Sonnet otherwise.
+     * Eval 2026-11-10: Sonnet matched Opus on 12 of 13 cases at 29% lower cost; on a new shared cause it asked where Opus
+     * drafted, so a turn whose author would ask the person runs the escalation model first (AgentOrchestrator).
+     */
     static final String AUTHOR_MODEL_PROPERTY = "darpan.agent.authorModel"
-    static final String DEFAULT_AUTHOR_MODEL = "claude-opus-5-5"
+    static final String DEFAULT_AUTHOR_MODEL = "claude-sonnet-5-5"
+    /** The model a doubtful author turn is rerun on before a question reaches the person; "none" turns it off. */
+    static final String ESCALATION_MODEL_PROPERTY = "darpan.agent.authorEscalationModel"
+    static final String DEFAULT_ESCALATION_MODEL = "claude-opus-5-5"
 
     /** The author's model: the property's when it is one the usage ledger prices (else refused, never billed at a guess). */
-    static String authorModel() {
-        String set = System.getProperty(AUTHOR_MODEL_PROPERTY)?.trim()
-        if (!set) return DEFAULT_AUTHOR_MODEL
+    static String authorModel() { return pricedModel(AUTHOR_MODEL_PROPERTY, DEFAULT_AUTHOR_MODEL) }
+
+    /** The author spec a doubtful turn is rerun on, or null when escalation is off or would be the same model. */
+    static RoleSpec escalationAuthor() {
+        String set = System.getProperty(ESCALATION_MODEL_PROPERTY)?.trim()
+        if (set?.equalsIgnoreCase("none")) return null
+        String model = pricedModel(ESCALATION_MODEL_PROPERTY, DEFAULT_ESCALATION_MODEL)
+        return model == authorModel() ? null : author().copy(model: model)
+    }
+
+    private static String pricedModel(String property, String fallback) {
+        String set = System.getProperty(property)?.trim()
+        if (!set) return fallback
         if (!AgentUsageLedger.PRICES.containsKey(set)) {
-            throw new IllegalArgumentException("${AUTHOR_MODEL_PROPERTY} is ${set}, which has no price; use one of ${AgentUsageLedger.PRICES.keySet().join(', ')}".toString())
+            throw new IllegalArgumentException("${property} is ${set}, which has no price; use one of ${AgentUsageLedger.PRICES.keySet().join(', ')}".toString())
         }
         return set
     }

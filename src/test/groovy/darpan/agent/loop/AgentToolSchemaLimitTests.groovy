@@ -60,7 +60,7 @@ class AgentToolSchemaLimitTests {
         String was = System.getProperty(RoleSpec.AUTHOR_MODEL_PROPERTY)
         try {
             System.clearProperty(RoleSpec.AUTHOR_MODEL_PROPERTY)
-            assertEquals("claude-opus-5-5", RoleSpec.author().model)
+            assertEquals("claude-sonnet-5-5", RoleSpec.author().model)
             System.setProperty(RoleSpec.AUTHOR_MODEL_PROPERTY, " claude-sonnet-5-5 ")
             RoleSpec sonnet = RoleSpec.author()
             assertEquals("claude-sonnet-5-5", sonnet.model)

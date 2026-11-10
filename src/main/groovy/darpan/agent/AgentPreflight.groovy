@@ -23,10 +23,13 @@ class AgentPreflight {
     static final long MAX_TOKENS = 256L
     static final String PING = "Preflight check: reply with the word OK and nothing else."
 
-    /** The request shapes a turn sends: the router, the investigator, the author and the ticket-only author. */
+    /** The request shapes a turn sends: router, investigator, author, ticket-only author, and the escalation author when on. */
     static List<RoleSpec> specs() {
-        return [RoleSpec.router(AgentOrchestrator.ROUTER_SCHEMA), RoleSpec.investigator().copy(outputSchema: AgentOrchestrator.EVIDENCE_SCHEMA),
-                RoleSpec.author(), RoleSpec.author().copy(tools: ["raise_ticket"])]
+        List<RoleSpec> out = [RoleSpec.router(AgentOrchestrator.ROUTER_SCHEMA), RoleSpec.investigator().copy(outputSchema: AgentOrchestrator.EVIDENCE_SCHEMA),
+                              RoleSpec.author(), RoleSpec.author().copy(tools: ["raise_ticket"])]
+        RoleSpec stronger = RoleSpec.escalationAuthor()
+        if (stronger != null) out << stronger
+        return out
     }
 
     /** "accepted", or the refusal, once known; null until then. */
