@@ -41,4 +41,46 @@
         </actions>
     </service>
 
+    <!-- DAR-BE-223. The panel's two reads. Neither calls the model or writes. -->
+
+    <service verb="get" noun="AgentStatus" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
+        <description>Whether the agent can run for the person now: state (ON, AGENT_OFF, AGENT_UNAVAILABLE or AGENT_REFUSED), grantState
+            (their AI access in this tenant: LIVE, NOT_GRANTED, EXPIRED or PAUSED) and canApprove (true only for someone allowed to
+            save the audit's checks).</description>
+        <out-parameters>
+            <parameter name="state"/>
+            <parameter name="grantState"/>
+            <parameter name="canApprove" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="status" from="darpan.agent.AgentOrchestrator.forRequest(ec).status(ec)"/>
+            <if condition="status == null || ec.message.hasError()"><return error="true"/></if>
+            <set field="state" from="status.state"/>
+            <set field="grantState" from="status.grantState"/>
+            <set field="canApprove" from="status.canApprove"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="AgentConversation" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
+        <description>The person's own conversation: its messages (theirs and the agent's replies) and its proposals with their status
+            now. Another person's or another tenant's conversation reads as not found.</description>
+        <in-parameters>
+            <parameter name="conversationId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="auditId"/>
+            <parameter name="findingId"/>
+            <parameter name="messages" type="List"><description>{messageId, kind (USER or ASSISTANT), text, question}</description></parameter>
+            <parameter name="proposals" type="List"><description>{proposalId, kind, status, statusMessage, provenanceStatus, blockedIds, backtest}</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="conversation" from="darpan.agent.AgentOrchestrator.forRequest(ec).conversation(ec, conversationId)"/>
+            <if condition="conversation == null || ec.message.hasError()"><return error="true"/></if>
+            <set field="auditId" from="conversation.auditId"/>
+            <set field="findingId" from="conversation.findingId"/>
+            <set field="messages" from="conversation.messages"/>
+            <set field="proposals" from="conversation.proposals"/>
+        </actions>
+    </service>
+
 </services>
