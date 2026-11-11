@@ -264,7 +264,9 @@ class AgentOrchestrator {
             evidence = [facts: carried, carried: true]
             turn.facts = carried
         } else if (brain || answer) {
-            Map found = investigate(turn, items, null, [])
+            // A follow-up on the same finding starts from the facts already found, and reads only what is missing.
+            List<Map> earlier = turn.findingId ? turn.transcript.lastFacts(turn.findingId) : null
+            Map found = investigate(turn, items, null, earlier ?: [])
             // A question deserves an answer: one more request from the facts already found, before any reply goes out empty.
             if (answer && !found.answer && !found.stopped) {
                 Map again = investigate(turn, items, ANSWER_MISSING, (List<Map>) found.facts)
@@ -338,7 +340,10 @@ class AgentOrchestrator {
         b << "Items (index from 0): " << JsonOutput.toJson(itemsView(items)) << "\n"
         b << "\nThe person's words:\n<<<MESSAGE\n" << turn.words << "\nMESSAGE>>>\n"
         if (need) b << "\nThe author needs this before it can write a change or ticket: " << oneLine(need, 500) << "\n"
-        if (priorFacts) b << "Evidence so far: " << JsonOutput.toJson([facts: priorFacts]) << "\n"
+        if (priorFacts) {
+            b << "Evidence so far: " << JsonOutput.toJson([facts: priorFacts]) << "\n"
+            b << "These were found earlier in this conversation. Read only what is missing from them; do not read the same record again.\n"
+        }
         return b.toString()
     }
 
