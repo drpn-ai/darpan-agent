@@ -407,7 +407,7 @@ class AgentOrchestrator {
             // The catalog is the turn's cached prefix after tools and the system prompt: sorted and id-free, so it is
             // byte-identical across this tenant's turns; everything per-turn comes after its breakpoint.
             blocks << ContentBlockParam.ofText(TextBlockParam.builder().text("This tenant's brain catalog (conclusions, rules, statements):\n" +
-                    JsonOutput.toJson(brainCatalog(turn.ec))).cacheControl(CacheControlEphemeral.builder().build()).build())
+                    JsonOutput.toJson(brainCatalog(turn.ec, turn.findingId))).cacheControl(CacheControlEphemeral.builder().build()).build())
         }
         blocks << ContentBlockParam.ofText(TextBlockParam.builder().text(authorInput(turn, items, evidence)).build())
         List<MessageParam> messages = [MessageParam.ofUserOfContentBlockParams(blocks)]
@@ -478,16 +478,21 @@ class AgentOrchestrator {
         return b.toString()
     }
 
-    private static Map brainCatalog(def ec) {
+    private Map brainCatalog(def ec, String findingId) {
         ec.message.pushErrors()
         try {
-            Map out = ec.service.sync().name("facade.AgentReadFacadeServices.get#AgentBrainCatalog").call()
+            Map out = readBrainCatalog(ec, findingId ? [findingId: findingId] : [:])
             if (ec.message.hasError()) return [conclusions: [], rules: [], statements: []]
             return [conclusions: out?.conclusions ?: [], rules: out?.rules ?: [], statements: out?.statements ?: []]
         } finally {
             ec.message.clearErrors()
             ec.message.popErrors()
         }
+    }
+
+    /** The catalog service call; with the open finding's id it reads only that finding's causes and audit (DAR-BE-216). */
+    protected Map readBrainCatalog(def ec, Map params) {
+        return (Map) ec.service.sync().name("facade.AgentReadFacadeServices.get#AgentBrainCatalog").parameters(params).call()
     }
 
     // ---------------------------------------------------------------- one role run

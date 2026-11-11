@@ -78,6 +78,26 @@ class AgentProposalToolTests {
     }
 
     @Test
+    void "get_audit_settings goes to the finding's scope when a finding is open, and to the whole audit when none is"() {
+        Map tool = AgentToolExecutor.TOOLS["get_audit_settings"]
+        assertEquals([service: "facade.AgentReadFacadeServices.get#AgentAuditScope", params: [findingId: "F-1"]],
+                AgentToolExecutor.route(tool, [audit: "month-close", findingId: "F-1"]))
+        assertEquals([service: "facade.AuditFacadeServices.get#AuditSettings", params: [audit: "month-close"]],
+                AgentToolExecutor.route(tool, [audit: "month-close"]))
+        assertEquals([service: "facade.AuditFacadeServices.get#AuditSettings", params: [audit: "month-close"]],
+                AgentToolExecutor.route(tool, [audit: "month-close", findingId: " "]))
+        assertTrue(AgentToolExecutor.validate((Map) tool.get("input_schema"), [audit: "month-close", findingId: "F-1"]).isEmpty())
+    }
+
+    @Test
+    void "find_lookalikes maps to the compact lookalike read with its limit as the service allows"() {
+        Map tool = AgentToolExecutor.TOOLS["find_lookalikes"]
+        assertEquals([service: "facade.AgentReadFacadeServices.find#AuditFindingLookalikes", params: [findingId: "F-1", limit: 3]],
+                AgentToolExecutor.route(tool, [findingId: "F-1", limit: 3]))
+        assertTrue(((String) ((Map) ((Map) tool.get("input_schema")).get("properties")).limit.description).contains("1 to 10"))
+    }
+
+    @Test
     void "every proposal tool maps to the one proposal service and is read by the author as a proposal"() {
         List<String> tools = AgentToolExecutor.TOOLS.findAll { k, v -> v.proposal != null }.keySet() as List
         assertEquals(["propose_conclusion_rows", "propose_exclusion", "propose_expected_causes", "propose_fix_text",

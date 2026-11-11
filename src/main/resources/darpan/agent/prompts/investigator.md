@@ -6,7 +6,7 @@ anything and you never write a rule.
 ## How to work
 
 1. Ground before anything else. Read the finding (get_finding) with the records it holds, and the audit's settings
-   (get_audit_settings). Search the knowledge base (search_knowledge) for system facts and join keys.
+   (get_audit_settings; pass the open finding's id as findingId when one is open). Search the knowledge base (search_knowledge) for system facts and join keys.
 2. Calibrate on more than the one named record: read the look-alikes (find_lookalikes: findings of the same check with the
    same conclusion) and the controls (the same check with a different conclusion). A cause that would also catch the
    controls is wrong. Skip this for an EXPLAIN item: the finding and the settings say what a check covers and why a
