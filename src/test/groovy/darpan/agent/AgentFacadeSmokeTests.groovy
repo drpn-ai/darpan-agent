@@ -31,6 +31,11 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue
 class AgentFacadeSmokeTests {
 
     private static final String SERVICE = "facade.AgentTurnFacadeServices.send#AgentTurn"
+    private static final String STATUS = "facade.AgentTurnFacadeServices.get#AgentStatus"
+    private static final String CONVERSATION = "facade.AgentTurnFacadeServices.get#AgentConversation"
+    private static final String AGF_MINE = "AGF_CONV_MINE"
+    private static final String AGF_THEIRS = "AGF_CONV_THEIRS"
+    private static final String AGF_FOREIGN = "AGF_CONV_FOREIGN"
     private static final String MINE = "AGF_TENANT_A"
     private static final String OTHER = "AGF_TENANT_B"
     private static final String USERNAME = "test.customer"
@@ -154,13 +159,81 @@ class AgentFacadeSmokeTests {
                 "no tool ran after the switch")
     }
 
+    @Test
+    void "get#AgentStatus reports the agent off and the person not granted"() {
+        Map on = onThread(USERNAME, MINE, [:], null, STATUS)
+        assertNull(on.failure, String.valueOf(on.failure))
+        assertFalse(on.hasError as boolean, on.errors.toString())
+        assertEquals("LIVE", on.result.grantState)
+        assertEquals(true, on.result.canApprove, "an editor can approve")
+
+        asSystem { upsert("darpan.auth.TenantSetting", [companyUserGroupId: MINE, agentEnabled: "N"]) }
+        assertEquals("AGENT_OFF", onThread(USERNAME, MINE, [:], null, STATUS).result.state)
+
+        asSystem { ec.entity.find("darpan.agent.AgentAccessGrant").condition("companyUserGroupId", MINE).deleteAll() }
+        assertEquals("NOT_GRANTED", onThread(USERNAME, MINE, [:], null, STATUS).result.grantState)
+    }
+
+    @Test
+    void "get#AgentStatus says a view-only member cannot approve"() {
+        String viewOnly = TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID
+        String editor = TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID
+        String member = TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME
+        asSystem {
+            ec.entity.find(member).condition([tenantUserGroupId: MINE, userId: USER, permissionUserGroupId: editor]).deleteAll()
+            upsert(member, [tenantUserGroupId: MINE, userId: USER, permissionUserGroupId: viewOnly, fromDate: FROM])
+        }
+        try {
+            Map out = onThread(USERNAME, MINE, [:], null, STATUS)
+            assertNull(out.failure, String.valueOf(out.failure))
+            assertEquals(false, out.result.canApprove)
+        } finally {
+            asSystem {
+                ec.entity.find(member).condition([tenantUserGroupId: MINE, userId: USER, permissionUserGroupId: viewOnly]).deleteAll()
+                upsert(member, [tenantUserGroupId: MINE, userId: USER, permissionUserGroupId: editor, fromDate: FROM])
+            }
+        }
+    }
+
+    @Test
+    void "get#AgentConversation returns my conversation and reads another user's or tenant's as not found"() {
+        asSystem {
+            [[AGF_MINE, MINE, USER], [AGF_THEIRS, MINE, "AGF_OTHER_USER"], [AGF_FOREIGN, OTHER, USER]].each { List c ->
+                upsert("darpan.agent.AgentConversation", [conversationId: c[0], companyUserGroupId: c[1], userId: c[2], auditId: AUDIT, createdDate: FROM])
+            }
+            upsert("darpan.agent.AgentMessage", [messageId: "AGF_M1", conversationId: AGF_MINE, companyUserGroupId: MINE, sequenceNum: 1L, kind: "USER",
+                    contentJson: JsonOutput.toJson([[type: "text", text: "Why is this open?"]])])
+            upsert("darpan.agent.AgentMessage", [messageId: "AGF_M2", conversationId: AGF_MINE, companyUserGroupId: MINE, sequenceNum: 2L, kind: "TOOL_RESULT",
+                    contentJson: JsonOutput.toJson([secret: "record data"])])
+            upsert("darpan.agent.AgentMessage", [messageId: "AGF_M3", conversationId: AGF_MINE, companyUserGroupId: MINE, sequenceNum: 3L, kind: "ASSISTANT",
+                    contentJson: JsonOutput.toJson([role: "REPLY", text: "It has no match.", question: null])])
+            upsert("darpan.agent.AuditChangeProposal", [proposalId: "AGF_P1", companyUserGroupId: MINE, conversationId: AGF_MINE, kind: "FIX_TEXT",
+                    status: "APPLIED", provenanceStatus: "PASS", blockedIds: "[]"])
+        }
+        Map mine = onThread(USERNAME, MINE, [conversationId: AGF_MINE], null, CONVERSATION)
+        assertNull(mine.failure, String.valueOf(mine.failure))
+        assertFalse(mine.hasError as boolean, mine.errors.toString())
+        assertEquals(["USER", "ASSISTANT"], mine.result.messages*.kind)
+        assertEquals(["Why is this open?", "It has no match."], mine.result.messages*.text)
+        assertEquals(["AGF_P1"], mine.result.proposals*.proposalId)
+        assertEquals(["APPLIED"], mine.result.proposals*.status)
+
+        [AGF_THEIRS, AGF_FOREIGN, "AGF_MISSING"].each { String id ->
+            Map out = onThread(USERNAME, MINE, [conversationId: id], null, CONVERSATION)
+            assertNull(out.failure, String.valueOf(out.failure))
+            assertTrue(out.hasError as boolean, "${id} reads as not found")
+            assertTrue((out.errors as List).any { (it as String).contains("was not found") }, out.errors.toString())
+            assertNull(out.result?.messages)
+        }
+    }
+
     // ------------------------------------------------------------------ helpers
 
     /**
      * One send#AgentTurn on a fresh thread with authz ON (the BrainChangeTicketSmokeTests pattern), logged in as username
      * (none: no session) with tenant active; gateway, when given, is that thread's model.
      */
-    private Map onThread(String username, String tenant, Map params, AgentRoleLoopTests.ScriptedGateway gateway) {
+    private Map onThread(String username, String tenant, Map params, AgentRoleLoopTests.ScriptedGateway gateway, String service = SERVICE) {
         Map holder = [:]
         Thread worker = new Thread({
             ExecutionContext tec = Moqui.getExecutionContextFactory().getExecutionContext()
@@ -170,7 +243,7 @@ class AgentFacadeSmokeTests {
                     tec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, tenant)
                     TenantAccessSupport.syncUserContext(tec)
                 }
-                Closure call = { tec.service.sync().name(SERVICE).parameters(new LinkedHashMap(params)).call() }
+                Closure call = { tec.service.sync().name(service).parameters(new LinkedHashMap(params)).call() }
                 holder.result = gateway == null ? call.call() :
                         AgentOrchestrator.overrideForThread(gateway, AgentOrchestratorTests.AVAILABLE, call)
                 holder.errors = new ArrayList<String>(tec.message.errors)

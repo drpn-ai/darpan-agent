@@ -211,6 +211,37 @@ class AgentOrchestrator {
         return out
     }
 
+    // ---------------------------------------------------------------- the panel's reads
+
+    /**
+     * DAR-BE-223. What the panel asks before it shows the box: state (ON, AGENT_OFF, AGENT_UNAVAILABLE or AGENT_REFUSED),
+     * grantState (the person's AI access here: LIVE, NOT_GRANTED, EXPIRED or PAUSED) and canApprove (the person may save the
+     * audit's checks, so may approve a draft). Null with an error when there is no active tenant.
+     */
+    Map status(def ec) {
+        String pinned = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        String userId = ec.user.userId as String
+        if (!pinned || !userId) { ec.message.addError("No active tenant."); return null }
+        return [state: availability.call(ec) ?: AgentSwitch.AGENT_OFF, grantState: AgentAccess.access(ec, pinned, userId).state,
+                canApprove: TenantAccessSupport.canEditActiveTenantData(ec)]
+    }
+
+    /**
+     * DAR-BE-223. The person's own conversation: auditId, findingId, messages {messageId, kind USER or ASSISTANT, text,
+     * question} and its proposals as send#AgentTurn lists them, with their status now. Another person's or another
+     * tenant's conversation reads as not found, like a missing one.
+     */
+    Map conversation(def ec, String conversationId) {
+        String pinned = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        String userId = ec.user.userId as String
+        if (!pinned || !userId) { ec.message.addError("No active tenant."); return null }
+        def row = conversationId ? TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.agent.AgentConversation", "conversationId", conversationId, pinned, WHY) : null
+        if (row == null || row.userId != userId) { ec.message.addError("Conversation ${conversationId} was not found.".toString()); return null }
+        Transcript transcript = transcriptFor(ec, pinned, conversationId)
+        List<Map> proposals = transcript.madeIds().proposals.collect { proposalView(ec, pinned, it) }.findAll { it != null }
+        return [auditId: row.auditId, findingId: row.findingId, messages: transcript.messages(), proposals: proposals]
+    }
+
     /** The conversation's transcript; tests override it to make a write fail. */
     protected Transcript transcriptFor(def ec, String pinned, String conversationId) {
         return new Transcript(ec, pinned, conversationId)
@@ -751,6 +782,24 @@ class AgentOrchestrator {
             }
             if (kind == "USER") insert.call()
             else ec.transaction.runRequireNew(null, "Could not write the agent transcript", insert)
+        }
+
+        /** What the person sees, oldest first: their messages and the replies. Tool results and operator notes stay out. */
+        List<Map> messages() {
+            List<Map> out = []
+            rows().condition("kind", EntityCondition.IN, ["USER", "ASSISTANT"]).orderBy(["sequenceNum", "lastUpdatedStamp", "messageId"]).list().each { msg ->
+                Object parsed = AgentOrchestrator.parseJson(msg.contentJson as String)
+                if (msg.kind == "USER") {
+                    List<String> texts = []
+                    (parsed instanceof List ? (List) parsed : [parsed]).each { Object blk ->
+                        if (blk instanceof Map && ((Map) blk).type == "text" && ((Map) blk).text instanceof String) texts << (String) ((Map) blk).text
+                    }
+                    out << [messageId: msg.messageId, kind: "USER", text: texts.join(" "), question: null]
+                } else if (parsed instanceof Map && ((Map) parsed).role == "REPLY") {
+                    out << [messageId: msg.messageId, kind: "ASSISTANT", text: ((Map) parsed).text, question: ((Map) parsed).question]
+                }
+            }
+            return out
         }
 
         /** The text of the person's last n messages before this one, oldest first. */
