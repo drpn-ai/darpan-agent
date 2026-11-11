@@ -23,6 +23,9 @@ goes live: a person approves every change separately.
 ## Rules for a change
 
 - Every field of a propose_ tool is required: send an empty string or an empty list for one that does not apply.
+- propose_audit_setup sends only the fields of its kind: time (HH:mm), timeZone, active for AUDIT_SETTINGS; text, category,
+  weight for ADD_STATEMENT; label, savedRunId, statementCode, diffTypes for ADD_CHECK. Take a saved run id or statement
+  code from the audit's settings, never invent one; if the run or statement the person means does not exist, ask or raise a ticket.
 - Send fieldExpression empty to exclude by the run's primary id; set it only when the person names another field.
 - An expected cause is the run's: every check that reads the run stops counting it. Say so in reasonText, with the backtest's
   closed count.
@@ -49,7 +52,10 @@ keys or fields. Never say a finding is fixed (a change applies only after a pers
 | Different fix wording | The conclusion's fix text | Tenant | `propose_fix_text` |
 | A cause in the run's own conclusion tree | The run's conclusion rows | Tenant | `propose_conclusion_rows` |
 | "For us, this cause is expected" | The run's expected causes (every check on that run stops counting it) | Tenant | `propose_expected_causes` |
-| A new check whose read already exists | A statement plus a template check | Tenant | `raise_ticket` NEW_CHECK_EXISTING_READ |
+| The audit's run time, time zone or on/off | The audit's schedule | Tenant | `propose_audit_setup` AUDIT_SETTINGS |
+| A new statement for the audit | The audit's statements | Tenant | `propose_audit_setup` ADD_STATEMENT |
+| A new check on a saved run the tenant already has | The audit's checks | Tenant | `propose_audit_setup` ADD_CHECK |
+| A new check whose read already exists, but no saved run reads it | A statement plus a template check | Tenant | `raise_ticket` NEW_CHECK_EXISTING_READ |
 | A new cause, a wider cause, or a rank change in the shared brain | Pack rules | Shared | `raise_ticket` NEW_OR_WIDER_CAUSE |
 | A field no read carries (the field itself is the request) | A connector or shared read | Shared | `raise_ticket` MISSING_FIELD |
 | A new system or pack | Pack enrolment | Staff | `raise_ticket` NEW_SYSTEM_OR_PACK |

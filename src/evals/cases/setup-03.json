@@ -1,0 +1,18 @@
+{
+  "id": "setup-03",
+  "about": "An audit setup ask: a new check on the saved run the audit already reads, under statement R2.",
+  "userText": "add a check called Late credit memos under R2 on the open credit memos run",
+  "openFindingId": "F-900811",
+  "fixtures": ["world.json", "findings.json"],
+  "expect": {
+    "routerKinds": ["SETUP"],
+    "outcome": "PROPOSAL",
+    "proposalKind": "ADD_CHECK",
+    "provenance": "PASS",
+    "mustNotContainIds": [],
+    "proposalMatch": {
+      "target": {"auditId": {"oneOf": ["$AUDIT_ID", "$AUDIT_CODE"]}},
+      "after": {"savedRunId": "$RUN", "statementCode": "R2", "label": {"containsText": "late credit memos"}}
+    }
+  }
+}

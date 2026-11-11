@@ -117,6 +117,15 @@
     "input_schema_resource": "darpan/agent/schemas/propose-conclusion-rows.json"
   },
   {
+    "name": "propose_audit_setup",
+    "service": "facade.AgentChangeFacadeServices.create#AuditChangeProposal",
+    "conversationScoped": true,
+    "strict": false,
+    "description": "Drafts setting up the audit itself: its daily run time, time zone or on/off (AUDIT_SETTINGS), a new statement (ADD_STATEMENT), or a new check on a saved run (ADD_CHECK). Send only the fields of the kind you chose. Nothing changes until a person approves it. Every record id and code in it must be one the person typed or already in the config; any other blocks the draft.",
+    "proposal": {"kindFrom": "kind", "target": ["auditId"], "after": ["time", "timeZone", "active", "text", "category", "weight", "label", "savedRunId", "statementCode", "diffTypes"]},
+    "input_schema_resource": "darpan/agent/schemas/propose-audit-setup.json"
+  },
+  {
     "name": "raise_ticket",
     "service": "facade.AgentChangeFacadeServices.create#BrainChangeTicket",
     "conversationScoped": true,

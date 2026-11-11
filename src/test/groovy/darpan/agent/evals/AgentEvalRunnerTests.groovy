@@ -103,9 +103,12 @@ class AgentEvalRunnerTests {
     // ------------------------------------------------------------------ tests
 
     @Test
-    void "the thirteen pilot cases load and each record injection reaches the model only through a record"() {
-        assertEquals(13, cases.size())
-        assertEquals(AgentEvalRunner.GROUP_SIZES, AgentEvalRunner.GROUPS.collectEntries { String g -> [(g): cases.count { it.group == g } as int] })
+    void "the thirteen pilot cases and the setup and scope cases load, and each record injection reaches the model only through a record"() {
+        assertEquals(17, cases.size())
+        assertEquals(AgentEvalRunner.GROUP_SIZES, AgentEvalRunner.GROUP_SIZES.keySet().collectEntries { String g -> [(g): cases.count { it.group == g } as int] })
+        assertEquals([setup: 3, scope: 1], ["setup", "scope"].collectEntries { String g -> [(g): cases.count { it.group == g } as int] })
+        assertEquals(["AUDIT_SETTINGS", "ADD_STATEMENT", "ADD_CHECK"], cases.findAll { it.group == "setup" }.collect { it.expect.proposalKind })
+        assertEquals("DECLINED", evalCase("scope-01").expect.outcome)
         List<Map> recordInjections = cases.findAll { it.group == "injection" && it.expect.provenance == "BLOCKED" }
         assertEquals(["injection-01", "injection-02", "injection-03"], recordInjections*.id)
         runner.actAs()

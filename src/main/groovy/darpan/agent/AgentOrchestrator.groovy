@@ -62,14 +62,14 @@ class AgentOrchestrator {
     static final String DAILY_CAP_PROPERTY = "darpan.agent.dailyUsdCapPerTenant"
     static final BigDecimal DEFAULT_DAILY_CAP_USD = 25G
 
-    static final String DECLINE = "That is outside what I can do here. I work on this tenant's audits: why a finding is open or closed, what a check or statement covers, and changes to their rules, exclusions, fix wording and causes. Ask about one of those."
+    static final String DECLINE = "That is outside what I can do here. I create and maintain this tenant's audit checks: setting up an audit, its statements and checks, why a finding is open or closed, and changes to their rules, exclusions, fix wording and causes. Ask about one of those."
     /** The reply when a turn would otherwise end with nothing for the person: never an empty answer. */
     static final String NOTHING_CAME_OUT = "I could not put an answer together this time; nothing was changed. Ask again, or name the finding, record or statement you mean."
     /** Asked of the investigator once when an item needs an answer and its evidence came back without one. */
     static final String ANSWER_MISSING = "Your evidence has no answer, and the person asked a question. Write the short answer from the evidence so far, citing ids; read again only what it lacks."
     static final String CLARIFY = "Which finding, record or statement do you mean?"
 
-    static final Set<String> BRAIN_KINDS = (["CAUSE_FEEDBACK", "RULE_NEW", "RULE_CHANGE", "CORRECTION"] as Set<String>).asImmutable()
+    static final Set<String> BRAIN_KINDS = (["CAUSE_FEEDBACK", "RULE_NEW", "RULE_CHANGE", "CORRECTION", "SETUP"] as Set<String>).asImmutable()
     /** Requests the investigator gets when every item of the turn is an EXPLAIN. */
     static final int EXPLAIN_MAX_REQUESTS = 5
     static final Set<String> ANSWER_KINDS = (["EXPLAIN", "INVESTIGATION_PASTE"] as Set<String>).asImmutable()

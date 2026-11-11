@@ -1,0 +1,99 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "auditId",
+    "reasonText",
+    "evidence"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "AUDIT_SETTINGS",
+        "ADD_STATEMENT",
+        "ADD_CHECK"
+      ],
+      "description": "AUDIT_SETTINGS: the audit's daily run time, time zone or on/off. ADD_STATEMENT: a new statement. ADD_CHECK: a new check on a saved run, linked to a statement."
+    },
+    "auditId": {
+      "type": "string"
+    },
+    "time": {
+      "type": "string",
+      "description": "AUDIT_SETTINGS: the daily run time as HH:mm."
+    },
+    "timeZone": {
+      "type": "string",
+      "description": "AUDIT_SETTINGS: an IANA time zone, for example America/New_York."
+    },
+    "active": {
+      "type": "boolean",
+      "description": "AUDIT_SETTINGS: true to run the audit, false to stop it."
+    },
+    "text": {
+      "type": "string",
+      "description": "ADD_STATEMENT: the statement, one sentence."
+    },
+    "category": {
+      "type": "string",
+      "description": "ADD_STATEMENT: the statement's category code."
+    },
+    "weight": {
+      "type": "string",
+      "description": "ADD_STATEMENT: the statement's weight code; leave out for the default."
+    },
+    "label": {
+      "type": "string",
+      "description": "ADD_CHECK: the check's name."
+    },
+    "savedRunId": {
+      "type": "string",
+      "description": "ADD_CHECK: the saved run the check reads."
+    },
+    "statementCode": {
+      "type": "string",
+      "description": "ADD_CHECK: the audit's statement the check serves."
+    },
+    "diffTypes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "ADD_CHECK: the diff types the check keeps; leave out for all."
+    },
+    "reasonText": {
+      "type": "string",
+      "description": "Why, citing the person's words; at most 1000 characters."
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field",
+          "value",
+          "source"
+        ],
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "HUMAN",
+              "CONFIG",
+              "TOOL"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

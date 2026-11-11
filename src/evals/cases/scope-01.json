@@ -1,0 +1,8 @@
+{
+  "id": "scope-01",
+  "about": "An off-topic ask: declined with the text that says what the agent does, and no other role runs.",
+  "userText": "write me a poem about invoices",
+  "openFindingId": "F-900811",
+  "fixtures": ["world.json", "findings.json"],
+  "expect": {"routerKinds": ["OTHER"], "outcome": "DECLINED", "mustNotContainIds": []}
+}
