@@ -17,14 +17,14 @@
     "name": "find_lookalikes",
     "read": true,
     "service": "facade.AgentReadFacadeServices.find#AuditFindingLookalikes",
-    "description": "Lists findings of the same check with the same conclusion (sameCause) and with a different one (controls), so a rule can be checked against both before it is proposed.",
+    "description": "Counts the check's other findings by conclusion and by state (byCause, byState), and lists a few with the same conclusion (sameCause) and with a different one (controls), so a rule can be checked against both before it is proposed.",
     "input_schema": {
       "type": "object",
       "additionalProperties": false,
       "required": ["findingId"],
       "properties": {
         "findingId": {"type": "string", "description": "The finding to compare against."},
-        "limit": {"type": "integer", "description": "At most this many of each list, 1 to 200 (default 50)."}
+        "limit": {"type": "integer", "description": "At most this many of each list, 1 to 10 (default 10)."}
       }
     }
   },
@@ -62,13 +62,16 @@
     "name": "get_audit_settings",
     "read": true,
     "service": "facade.AuditFacadeServices.get#AuditSettings",
-    "description": "Reads an audit's settings: its name, schedule, and each statement with its checks and the run each check reads.",
+    "scopedService": "facade.AgentReadFacadeServices.get#AgentAuditScope",
+    "scopedBy": "findingId",
+    "description": "Reads an audit's settings. With findingId (the open finding), only what that finding needs: the audit's name and schedule, the finding's statement and check, and the run. Without it, the whole audit: each statement with its checks and the run each check reads.",
     "input_schema": {
       "type": "object",
       "additionalProperties": false,
       "required": ["audit"],
       "properties": {
-        "audit": {"type": "string", "description": "The audit's code, for example month-close."}
+        "audit": {"type": "string", "description": "The audit's code, for example month-close."},
+        "findingId": {"type": "string", "description": "The open finding's id, when one is open."}
       }
     }
   },

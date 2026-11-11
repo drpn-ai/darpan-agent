@@ -73,9 +73,10 @@ class AgentToolExecutor {
         if (problems) return [isError: true, content: "${INVALID_INPUT}: ${problems.join('; ')}".toString()]
         if (tool.control) return [isError: false, control: tool.control as String, content: null]
 
-        Map params = tool.proposal != null ? proposalParams((Map) tool.proposal, input) : new LinkedHashMap(input)
+        Map routed = route(tool, input)
+        Map params = (Map) routed.params
         if (tool.conversationScoped) params.conversationId = conversationId
-        String service = tool.service as String
+        String service = routed.service as String
         Map done = AgentCallMarker.run {
             // Errors already on ec.message are set aside for the call and put back after it, so the call is not refused
             // because of them, and only the errors this call added are reported (and then cleared).
@@ -157,6 +158,23 @@ class AgentToolExecutor {
     private static String token(Object v) {
         String s = v?.toString()
         return s != null && s ==~ /[A-Za-z0-9_\-.]{1,64}/ ? s : null
+    }
+
+    /**
+     * The service and parameters of a call. A tool with scopedService and scopedBy goes to scopedService, with only the
+     * scopedBy field, when that field is given and not blank (an open finding), and to service with the rest otherwise.
+     */
+    static Map route(Map tool, Map input) {
+        if (tool.proposal != null) return [service: tool.service, params: proposalParams((Map) tool.proposal, input)]
+        String by = tool.scopedBy as String
+        if (tool.scopedService && by) {
+            Object scope = input.get(by)
+            if (scope != null && scope.toString().trim()) return [service: tool.scopedService, params: [(by): scope]]
+            Map rest = new LinkedHashMap(input)
+            rest.remove(by)
+            return [service: tool.service, params: rest]
+        }
+        return [service: tool.service, params: new LinkedHashMap(input)]
     }
 
     /** The service call, as the signed-in user, in its own transaction so a failed tool cannot roll back the turn's writes. */
@@ -265,6 +283,12 @@ class AgentToolExecutor {
                 def m = VERB.matcher(service)
                 if (!m.find() || !(m.group(1).toLowerCase(Locale.ROOT) in ALLOWED_VERBS))
                     throw new IllegalStateException("Agent tool ${name} maps to ${service}; a tool may only map to a ${ALLOWED_VERBS.join('/')} service".toString())
+            }
+            String scoped = t.scopedService as String
+            if (scoped) {
+                def m = VERB.matcher(scoped)
+                if (!t.scopedBy || !m.find() || !(m.group(1).toLowerCase(Locale.ROOT) in ALLOWED_VERBS))
+                    throw new IllegalStateException("Agent tool ${name} needs scopedBy and a scopedService with a ${ALLOWED_VERBS.join('/')} verb".toString())
             }
             if (out.containsKey(name)) throw new IllegalStateException("Agent tool ${name} is listed twice".toString())
             out[name] = t.asImmutable()

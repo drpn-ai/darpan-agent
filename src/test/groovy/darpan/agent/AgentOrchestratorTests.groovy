@@ -322,6 +322,28 @@ class AgentOrchestratorTests {
     }
 
     @Test
+    void "the brain catalog request carries the open finding, and none when no finding is open"() {
+        List<Map> asked = []
+        Closure<AgentOrchestrator> orchestrator = { def gw ->
+            new AgentOrchestrator(gw, AVAILABLE) {
+                @Override
+                protected Map readBrainCatalog(def e, Map params) { asked << params; return super.readBrainCatalog(e, params) }
+            }
+        }
+        String words = "A claim made twice on one product is its own cause, not memo left open. Add that cause."
+        Closure<AgentRoleLoopTests.ScriptedGateway> gateway = {
+            new AgentRoleLoopTests.ScriptedGateway([router([item("RULE_NEW", words)]),
+                evidence([fact("findingId", FINDING, "TOOL")]),
+                authorSays([toolUse("tu_1", "ask_human", [question: "What counts as a second claim?", options: []])])])
+        }
+        send(orchestrator(gateway()), words)
+        assertEquals([[findingId: FINDING]], asked)
+        asked.clear()
+        send(orchestrator(gateway()), words, null)
+        assertEquals([[:]], asked)
+    }
+
+    @Test
     void "an author that would ask the person is rerun on the escalation model first, and only its question goes out"() {
         System.setProperty(darpan.agent.loop.RoleSpec.ESCALATION_MODEL_PROPERTY, "claude-opus-5-5")
         String words = "A claim made twice on one product is its own cause, not memo left open. Add that cause."
