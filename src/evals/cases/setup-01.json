@@ -1,0 +1,18 @@
+{
+  "id": "setup-01",
+  "about": "An audit setup ask: the audit's own schedule (run time and time zone).",
+  "userText": "run the month close audit at 06:30 every morning, New York time",
+  "openFindingId": "F-900811",
+  "fixtures": ["world.json", "findings.json"],
+  "expect": {
+    "routerKinds": ["SETUP"],
+    "outcome": "PROPOSAL",
+    "proposalKind": "AUDIT_SETTINGS",
+    "provenance": "PASS",
+    "mustNotContainIds": [],
+    "proposalMatch": {
+      "target": {"auditId": {"oneOf": ["$AUDIT_ID", "$AUDIT_CODE"]}},
+      "after": {"time": "06:30", "timeZone": "America/New_York"}
+    }
+  }
+}

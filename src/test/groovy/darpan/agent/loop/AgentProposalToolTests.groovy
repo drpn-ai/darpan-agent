@@ -71,6 +71,27 @@ class AgentProposalToolTests {
     }
 
     @Test
+    void "the audit setup tool takes its kind from the input and sends only that kind's fields"() {
+        Map settings = proposal("propose_audit_setup", [kind: "AUDIT_SETTINGS", auditId: "A1", time: "06:30", timeZone: "UTC", active: false,
+                                                        reasonText: "x", evidence: EVIDENCE])
+        assertEquals([kind: "AUDIT_SETTINGS", target: [auditId: "A1"], after: [time: "06:30", timeZone: "UTC", active: false],
+                      reasonText: "x", evidence: EVIDENCE], settings)
+        Map statement = proposal("propose_audit_setup", [kind: "ADD_STATEMENT", auditId: "A1", text: "Every return is credited.", category: "AUDC_RETURNS",
+                                                         weight: "", reasonText: "x", evidence: []])
+        assertEquals([kind: "ADD_STATEMENT", target: [auditId: "A1"], after: [text: "Every return is credited.", category: "AUDC_RETURNS"],
+                      reasonText: "x", evidence: []], statement)
+        Map check = proposal("propose_audit_setup", [kind: "ADD_CHECK", auditId: "A1", label: "Open memos", savedRunId: "R1", statementCode: "S1",
+                                                     diffTypes: [], reasonText: "x", evidence: []])
+        assertEquals([kind: "ADD_CHECK", target: [auditId: "A1"], after: [label: "Open memos", savedRunId: "R1", statementCode: "S1"],
+                      reasonText: "x", evidence: []], check)
+        Map tool = AgentToolExecutor.TOOLS["propose_audit_setup"]
+        assertEquals("facade.AgentChangeFacadeServices.create#AuditChangeProposal", AgentToolExecutor.route(tool, [kind: "ADD_CHECK", auditId: "A1"]).service)
+        Map schema = (Map) tool.get("input_schema")
+        assertTrue(AgentToolExecutor.validate(schema, [kind: "AUDIT_SETTINGS", auditId: "A1", time: "06:30", reasonText: "x", evidence: []]).isEmpty())
+        assertFalse(AgentToolExecutor.validate(schema, [kind: "EXPECTED_CAUSES", auditId: "A1", reasonText: "x", evidence: []]).isEmpty(), "only the three setup kinds")
+    }
+
+    @Test
     void "an empty required value is left out so the core refuses it as missing"() {
         Map p = proposal("propose_exclusion", [savedRunId: "", fileSide: "FILE_1", fieldExpression: "", filterValues: [], reasonText: "x", evidence: []])
         assertFalse(((Map) p.target).containsKey("savedRunId"))
@@ -100,7 +121,7 @@ class AgentProposalToolTests {
     @Test
     void "every proposal tool maps to the one proposal service and is read by the author as a proposal"() {
         List<String> tools = AgentToolExecutor.TOOLS.findAll { k, v -> v.proposal != null }.keySet() as List
-        assertEquals(["propose_conclusion_rows", "propose_exclusion", "propose_expected_causes", "propose_fix_text",
+        assertEquals(["propose_audit_setup", "propose_conclusion_rows", "propose_exclusion", "propose_expected_causes", "propose_fix_text",
                       "propose_statement_narrowing"], tools.sort())
         tools.each { String t ->
             assertEquals("facade.AgentChangeFacadeServices.create#AuditChangeProposal", AgentToolExecutor.serviceOf(t), t)

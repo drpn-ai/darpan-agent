@@ -367,11 +367,14 @@ class AgentToolExecutor {
      * The proposal service's input from a proposal tool's flat input: {kind, target, after, reasonText, evidence}, target and
      * after picked by the catalog entry's key lists. An empty string or list is "not given" (every field of a proposal tool is
      * required, to keep strict schemas small) and is left out at every level of target and after, so the core reads what
-     * it read when the field was absent and refuses a missing required one as before.
+     * it read when the field was absent and refuses a missing required one as before. A field a non-strict tool leaves out
+     * is null and left out the same way.
      */
     static Map proposalParams(Map proposal, Map input) {
         Closure<Map> pick = { List keys -> (Map) given(keys.collectEntries { [(it): input.get(it)] }) ?: [:] }
-        return [kind: proposal.kind, target: pick((List) proposal.target), after: pick((List) proposal.after),
+        // A catalog entry names its kind, or "kindFrom": the input field that carries it (propose_audit_setup: three kinds, one tool).
+        String kind = proposal.kindFrom ? input.get(proposal.kindFrom as String) as String : proposal.kind as String
+        return [kind: kind, target: pick((List) proposal.target), after: pick((List) proposal.after),
                 reasonText: input.reasonText, evidence: input.evidence]
     }
 

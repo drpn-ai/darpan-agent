@@ -98,7 +98,7 @@ final class RoleSpec {
 
     static RoleSpec author() {
         return new RoleSpec(role: AUTHOR, model: authorModel(), effort: "HIGH", systemPromptPath: "darpan/agent/prompts/author.md",
-                tools: ["propose_exclusion", "propose_statement_narrowing", "propose_expected_causes", "propose_fix_text", "propose_conclusion_rows", "raise_ticket",
+                tools: ["propose_exclusion", "propose_statement_narrowing", "propose_expected_causes", "propose_fix_text", "propose_conclusion_rows", "propose_audit_setup", "raise_ticket",
                         "ask_human", "request_more_evidence"],
                 maxRequests: 8, maxToolCalls: 6, wallClockMs: 120_000L, maxTokens: 32_000L)
     }

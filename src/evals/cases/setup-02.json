@@ -1,0 +1,18 @@
+{
+  "id": "setup-02",
+  "about": "An audit setup ask: a new statement for the audit.",
+  "userText": "add a statement to this audit: every refund is posted to the customer within two days",
+  "openFindingId": "F-900811",
+  "fixtures": ["world.json", "findings.json"],
+  "expect": {
+    "routerKinds": ["SETUP"],
+    "outcome": "PROPOSAL",
+    "proposalKind": "ADD_STATEMENT",
+    "provenance": "PASS",
+    "mustNotContainIds": [],
+    "proposalMatch": {
+      "target": {"auditId": {"oneOf": ["$AUDIT_ID", "$AUDIT_CODE"]}},
+      "after": {"text": {"containsText": "refund"}}
+    }
+  }
+}

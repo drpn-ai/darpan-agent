@@ -34,7 +34,7 @@ class AgentToolSchemaLimitTests {
 
     @Test
     void "the author's strict tools have no optional parameters and no unions"() {
-        // Six strict tools: a seventh (propose_expected_causes, 2026-11-06 eval) made every author request a 400.
+        // Six strict tools: a seventh (propose_expected_causes, 2026-11-06 eval) made every author request a 400. propose_audit_setup is sent without strict, so the count stays.
         assertEquals([tools: 6, optional: 0, unions: 0], AgentToolExecutor.strictCounts(RoleSpec.author().tools, null))
     }
 
@@ -51,7 +51,7 @@ class AgentToolSchemaLimitTests {
     @Test
     void "the proposal tools are strict except propose_expected_causes, and raise_ticket is sent without strict"() {
         Map<String, Boolean> strict = AgentToolExecutor.toolDefinitions(RoleSpec.author().tools).collectEntries { [(it.name()): it.strict().orElse(false)] }
-        assertEquals([ask_human: true, propose_conclusion_rows: true, propose_exclusion: true, propose_expected_causes: false,
+        assertEquals([ask_human: true, propose_audit_setup: false, propose_conclusion_rows: true, propose_exclusion: true, propose_expected_causes: false,
                       propose_fix_text: true, propose_statement_narrowing: true, raise_ticket: false, request_more_evidence: true], strict)
     }
 

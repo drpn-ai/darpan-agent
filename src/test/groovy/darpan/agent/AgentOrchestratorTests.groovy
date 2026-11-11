@@ -540,11 +540,30 @@ class AgentOrchestratorTests {
     }
 
     @Test
-    void "OTHER is declined with one router call"() {
+    void "a SETUP item is not declined: it reaches the author, which drafts an audit setup proposal"() {
+        String words = "Add a statement to this audit: every returned item is credited within a day."
+        def g = new AgentRoleLoopTests.ScriptedGateway([
+                router([item("SETUP", words)]),
+                evidence([fact("auditId", AUDIT, "CONFIG")]),
+                authorSays([toolUse("tu_1", "propose_audit_setup", [kind: "ADD_STATEMENT", auditId: AUDIT, text: "Every returned item is credited within a day.",
+                        category: "AUDC_RETURNS", reasonText: "The person asked for this statement.", evidence: []])]),
+                authorEnds("I drafted a new statement for the audit. It applies once an editor approves it.")])
+        Map out = send(new AgentOrchestrator(g, AVAILABLE), words)
+
+        assertNotEquals("DECLINED", out.outcome, out.toString())
+        assertNotEquals(AgentOrchestrator.DECLINE, out.reply)
+        assertEquals(4, g.sent.size(), "router, investigator, author twice")
+        List<Map> made = (List<Map>) out.proposals
+        assertEquals(["ADD_STATEMENT"], made*.kind, out.toString())
+    }
+
+    @Test
+    void "OTHER is declined with one router call, and the reply says the agent creates and maintains audit checks"() {
         def g = new AgentRoleLoopTests.ScriptedGateway([router([item("OTHER", "Write me a poem about invoices.")])])
         Map out = send(new AgentOrchestrator(g, AVAILABLE), "Write me a poem about invoices.")
         assertEquals("DECLINED", out.outcome)
         assertEquals(AgentOrchestrator.DECLINE, out.reply)
+        assertTrue((out.reply as String).contains("create and maintain this tenant's audit checks"), out.reply as String)
         assertEquals(1, g.sent.size())
         assertEquals(1L, asSystem { ec.entity.find("darpan.agent.AgentTurn").useCache(false).count() })
     }

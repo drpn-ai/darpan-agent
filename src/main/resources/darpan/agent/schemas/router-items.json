@@ -12,7 +12,7 @@
         "required": ["kind", "span", "refs", "confidence"],
         "properties": {
           "kind": {"type": "string", "enum": ["EXPLAIN", "CAUSE_FEEDBACK", "RULE_NEW", "RULE_CHANGE", "INVESTIGATION_PASTE", "CORRECTION",
-            "DISPLAY_FEEDBACK", "PRODUCT_BUG", "OTHER"]},
+            "SETUP", "DISPLAY_FEEDBACK", "PRODUCT_BUG", "OTHER"]},
           "span": {"type": "string", "description": "The person's own words for this item, copied exactly."},
           "refs": {
             "type": "object",
