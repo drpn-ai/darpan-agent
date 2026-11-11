@@ -753,6 +753,8 @@ class AgentOrchestrator {
     static class Transcript {
         /** Newest first; a duplicate sequence number (two sends at once) falls back to write time, then id. */
         static final List<String> NEWEST_FIRST = ["-sequenceNum", "-lastUpdatedStamp", "-messageId"].asImmutable()
+        /** DAR-BE-224: the most OPERATOR rows lastFacts reads, so a long run of approval notes stays a bounded read. */
+        static final int OPERATOR_ROWS_READ = 50
         final def ec
         final String pinned
         final String conversationId
@@ -832,9 +834,14 @@ class AgentOrchestrator {
          * a stored row never reaches the author unfiltered.
          */
         List<Map> lastFacts(String findingId) {
-            for (def msg : rows().condition("kind", "OPERATOR").orderBy(NEWEST_FIRST).limit(AgentOrchestrator.EARLIER_TURNS).list()) {
+            // DAR-BE-224: approvals, rejects and reverts write plain-text OPERATOR notes too; only a turn's own record (a Map)
+            // counts toward the earlier turns looked at, so a run of notes cannot push the facts out of reach.
+            int turnsSeen = 0
+            for (def msg : rows().condition("kind", "OPERATOR").orderBy(NEWEST_FIRST).limit(OPERATOR_ROWS_READ).list()) {
                 Object parsed = AgentOrchestrator.parseJson(msg.contentJson as String)
-                if (!(parsed instanceof Map) || !(((Map) parsed).facts instanceof List)) continue
+                if (!(parsed instanceof Map)) continue
+                if (++turnsSeen > AgentOrchestrator.EARLIER_TURNS) return null
+                if (!(((Map) parsed).facts instanceof List)) continue
                 if (((Map) parsed).findingId != findingId) return null
                 List<Map> facts = (List<Map>) AgentOrchestrator.typedEvidence([facts: ((Map) parsed).facts])?.facts
                 return facts ?: null

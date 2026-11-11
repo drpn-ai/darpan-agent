@@ -739,6 +739,29 @@ class AgentOrchestratorTests {
                 "the repeated read is answered from the earlier one, not run")
     }
 
+    // DAR-BE-224 writes an operator note into the conversation for every approve, reject and revert; a run of them must
+    // not push the earlier turn's facts out of reach of the next follow-up on the same finding.
+    @Test
+    void "operator notes from approvals do not crowd out the facts a follow-up starts from"() {
+        List<Map> facts = [fact("findingId", FINDING, "TOOL"), fact("state", "OPEN", "TOOL")]
+        def g = new AgentRoleLoopTests.ScriptedGateway([
+                router([item("EXPLAIN", "Why is this one open?", 0.9, [FINDING])]),
+                evidence(facts, "${FINDING} is open: its state is OPEN.".toString()),
+                router([item("EXPLAIN", "And why that state?", 0.9, [FINDING])]),
+                evidence(facts, "${FINDING} is OPEN.".toString())])
+        def o = new AgentOrchestrator(g, AVAILABLE)
+        String conversation = send(o, "Why is this one open?").conversationId as String
+        asSystem {
+            (1..5).each { int i ->
+                ec.entity.makeValue("darpan.agent.AgentMessage").setAll([messageId: "AGO_NOTE_${i}".toString(), conversationId: conversation,
+                        companyUserGroupId: MINE, sequenceNum: 1000L + i, kind: "OPERATOR",
+                        contentJson: groovy.json.JsonOutput.toJson([[type: "text", text: "Proposal P${i} is now APPLIED.".toString()]])]).create()
+            }
+        }
+        assertEquals("DONE", send(o, "And why that state?", FINDING, conversation).outcome)
+        assertTrue(sentJson(g, 3).contains("Evidence so far"), "the facts survive five operator notes")
+    }
+
     @Test
     void "a follow-up on another finding or of another kind investigates again"() {
         asSystem {
