@@ -2,6 +2,7 @@ package darpan.agent
 
 import com.anthropic.models.messages.Message
 import com.anthropic.models.messages.MessageParam
+import darpan.agent.loop.AgentRoleLoop
 import darpan.agent.loop.AgentRoleLoopTests
 import darpan.agent.loop.RoleResult
 import darpan.agent.loop.RoleSpec
@@ -234,6 +235,20 @@ class AgentOrchestratorTests {
         Map silent = send(new AgentOrchestrator(empty, AVAILABLE), "Why is this one open?")
         assertEquals("INCOMPLETE", silent.outcome)
         assertEquals(AgentOrchestrator.NOTHING_CAME_OUT, silent.reply, "never an empty reply")
+    }
+
+    @Test
+    void "an EXPLAIN-only turn gives the investigator at most 5 requests, the last with no cache marker"() {
+        List<Object> script = [router([item("EXPLAIN", "Why is this one open?", 0.9, [FINDING])])]
+        (1..5).each { int i -> script << msg("tool_use", [toolUse("tu_${i}".toString(), "search_knowledge", [words: "w${i}".toString()])]) }
+        def g = new AgentRoleLoopTests.ScriptedGateway(script)
+        send(new AgentOrchestrator(g, AVAILABLE), "Why is this one open?")
+
+        assertEquals(6, g.sent.size(), "router, then 5 investigator requests; a 6th is never sent")
+        assertNotNull(wire(g.sent[4]).cache_control, "the 4th investigator request still caches")
+        assertNull(wire(g.sent[5]).cache_control, "the last investigator request has no cache marker")
+        List<Map> last = (List<Map>) wire(g.sent[5]).messages.last().content
+        assertEquals(AgentRoleLoop.LAST_REQUEST_NOTICE, last.last().text)
     }
 
     @Test

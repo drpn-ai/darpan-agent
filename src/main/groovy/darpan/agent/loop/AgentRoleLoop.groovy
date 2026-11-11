@@ -164,7 +164,7 @@ class AgentRoleLoop {
 
             Message response
             try {
-                response = sendWithRetries(gateway, buildParams(spec, result.messages, forceText), deadline)
+                response = sendWithRetries(gateway, buildParams(spec, result.messages, forceText, result.requestCount + 1 >= spec.maxRequests), deadline)
             } catch (StreamInterruptedException e) {
                 // Billed: the stream had started. What it reported counts toward the turn and the tenant's daily cap.
                 if (e.usage != null) {
@@ -286,7 +286,7 @@ class AgentRoleLoop {
      * and never read. Explicit markers stay at most 3 (system, plus the author's brain catalog), so with this one the
      * request is within the API's 4.
      */
-    static MessageCreateParams buildParams(RoleSpec spec, List<MessageParam> messages, boolean noTools = false) {
+    static MessageCreateParams buildParams(RoleSpec spec, List<MessageParam> messages, boolean noTools = false, boolean lastRequest = false) {
         MessageCreateParams.Builder b = MessageCreateParams.builder()
                 .model(spec.model)
                 .maxTokens(spec.maxTokens)
@@ -296,7 +296,8 @@ class AgentRoleLoop {
         if (spec.tools) b.tools(AgentToolExecutor.toolDefinitions(spec.tools).collect { ToolUnion.ofTool(it) })
         // The tools stay listed (the cached prefix is unchanged); the model cannot call one on this request.
         if (spec.tools && noTools) b.toolChoice(ToolChoice.ofNone(ToolChoiceNone.builder().build()))
-        if (spec.maxRequests > 1) b.cacheControl(CacheControlEphemeral.builder().build())
+        // A request known to be the last writes no cache: nothing would read it.
+        if (spec.maxRequests > 1 && !lastRequest) b.cacheControl(CacheControlEphemeral.builder().build())
         if (spec.adaptiveThinking()) b.thinking(ThinkingConfigAdaptive.builder().build())
         Map output = [effort: spec.effort.toLowerCase(Locale.ROOT)]
         if (spec.outputSchema != null) output.format = [type: "json_schema", schema: spec.outputSchema]

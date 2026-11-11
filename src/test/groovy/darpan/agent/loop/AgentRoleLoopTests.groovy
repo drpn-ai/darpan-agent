@@ -327,6 +327,19 @@ class AgentRoleLoopTests {
     }
 
     @Test
+    void "the last allowed request writes no cache marker, the ones before it do"() {
+        def gateway = new ScriptedGateway([
+                msg("tool_use", [toolUse("tu_1", "search_knowledge", [words: "a"])]),
+                msg("tool_use", [toolUse("tu_2", "search_knowledge", [words: "b"])]),
+                msg("end_turn", [text("Answer from what was read.")])])
+        run(investigator().copy(maxRequests: 3), gateway)
+        assertEquals(3, gateway.sent.size())
+        assertNotNull(wire(gateway.sent[0]).cache_control, "the first request caches the conversation")
+        assertNotNull(wire(gateway.sent[1]).cache_control)
+        assertNull(wire(gateway.sent[2]).cache_control, "the last request has no top-level cache marker")
+    }
+
+    @Test
     void "pause_turn is resent"() {
         def gateway = new ScriptedGateway([
                 msg("pause_turn", [text("Still working.")]),

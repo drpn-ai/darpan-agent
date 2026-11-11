@@ -70,6 +70,8 @@ class AgentOrchestrator {
     static final String CLARIFY = "Which finding, record or statement do you mean?"
 
     static final Set<String> BRAIN_KINDS = (["CAUSE_FEEDBACK", "RULE_NEW", "RULE_CHANGE", "CORRECTION"] as Set<String>).asImmutable()
+    /** Requests the investigator gets when every item of the turn is an EXPLAIN. */
+    static final int EXPLAIN_MAX_REQUESTS = 5
     static final Set<String> ANSWER_KINDS = (["EXPLAIN", "INVESTIGATION_PASTE"] as Set<String>).asImmutable()
     static final Set<String> TICKET_KINDS = (["DISPLAY_FEEDBACK", "PRODUCT_BUG"] as Set<String>).asImmutable()
 
@@ -320,6 +322,8 @@ class AgentOrchestrator {
     /** [facts, answer, stopped (the role's outcome when it did not finish)]. */
     private Map investigate(Turn turn, List<Map> items, String need, List<Map> priorFacts) {
         RoleSpec spec = RoleSpec.investigator().copy(outputSchema: EVIDENCE_SCHEMA)
+        // A why-question needs a short look, not the full read budget.
+        if (items && items.every { it.kind == "EXPLAIN" }) spec = spec.copy(maxRequests: Math.min(spec.maxRequests, EXPLAIN_MAX_REQUESTS))
         RoleResult r = role(turn, spec, [MessageParam.ofUser(investigatorInput(turn, items, need, priorFacts))])
         if (r.outcome != "DONE") return [facts: priorFacts, answer: null, stopped: r.outcome]
         Map typed = typedEvidence(parseJson(r.text()))
