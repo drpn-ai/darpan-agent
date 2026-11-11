@@ -675,6 +675,30 @@ class AgentOrchestratorTests {
     }
 
     @Test
+    void "a second EXPLAIN on the same finding starts from the evidence so far, and a repeated read is not run"() {
+        List<Map> facts = [fact("findingId", FINDING, "TOOL"), fact("state", "OPEN", "TOOL")]
+        def g = new AgentRoleLoopTests.ScriptedGateway([
+                router([item("EXPLAIN", "Why is this one open?", 0.9, [FINDING])]),
+                evidence(facts, "${FINDING} is open: its state is OPEN.".toString()),
+                router([item("EXPLAIN", "And why that state?", 0.9, [FINDING])]),
+                msg("tool_use", [toolUse("tu_1", "get_audit_settings", [audit: "month-close"])]),
+                msg("tool_use", [toolUse("tu_2", "get_audit_settings", [audit: "month-close"])]),
+                evidence(facts, "${FINDING} is OPEN.".toString())])
+        def o = new AgentOrchestrator(g, AVAILABLE)
+        String conversation = send(o, "Why is this one open?").conversationId as String
+        assertEquals("DONE", send(o, "And why that state?", FINDING, conversation).outcome)
+
+        String input = sentJson(g, 3)
+        assertTrue(input.contains("Evidence so far") && input.contains("OPEN") && input.contains("Read only what is missing"),
+                "the second investigation starts from the first one's facts")
+        assertFalse(sentJson(g, 1).contains("Evidence so far"), "the first investigation has none")
+        List<Map> repeat = (List<Map>) wire(g.sent[5]).messages.last().content
+        assertEquals("tu_2", repeat[0].tool_use_id)
+        assertEquals(AgentRoleLoop.SAME_AS_EARLIER, repeat[0].content instanceof List ? repeat[0].content[0].text : repeat[0].content,
+                "the repeated read is answered from the earlier one, not run")
+    }
+
+    @Test
     void "a follow-up on another finding or of another kind investigates again"() {
         asSystem {
             upsert("darpan.audit.AuditFinding", [findingId: "F-90003", companyUserGroupId: MINE, statementId: "AGO_R1", checkId: "AGO_CHK",
