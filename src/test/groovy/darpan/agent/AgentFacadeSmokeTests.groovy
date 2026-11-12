@@ -254,7 +254,45 @@ class AgentFacadeSmokeTests {
         }
     }
 
+    // DAR-BE-207: core's audit run update asks for the words by service name, after an automation run where no one is
+    // signed in and no tenant is active; the writer reads the named tenant's switch and answers checked words.
+    @Test
+    void "core's run update gets the words with no session, only for a tenant with the agent on"() {
+        Map facts = [totals: [open: 12, newToday: 2, fixedToday: 0],
+                     rules : [[id: "R1", text: "Every order is billed.", open: 12, newToday: 2, fixedToday: 0, checksNotRun: []]],
+                     groups: [[rule: "R1", cause: "Not exported", count: 12, fixText: "Export the order.", ids: ["ORD-1"]]]]
+        String answer = JsonOutput.toJson([headline: "12 findings are open.", fixes: [[key: "R1|Not exported", text: "Export these orders."]]])
+        int asked = 0
+        Closure previous = AuditRunWriter.gatewayFor
+        AuditRunWriter.gatewayFor = { def e -> { Object[] args -> asked++; msg("end_turn", [text(answer)], [input_tokens: 500, output_tokens: 40], AuditRunWriter.MODEL) } as darpan.agent.claude.ModelGateway }
+        try {
+            assertTrue(ec.service.isServiceDefined("agent.AgentWriterServices.write#AuditRunWords"))
+            assertEquals([headline: "12 findings are open.", fixes: ["R1|Not exported": "Export these orders."]], anonymously { tec ->
+                darpan.audit.AuditRunUpdateSupport.words(tec, MINE, facts) })
+            assertEquals(1, asked)
+
+            asSystem { upsert("darpan.auth.TenantSetting", [companyUserGroupId: OTHER, agentEnabled: "N"]) }
+            assertEquals([:], anonymously { tec -> darpan.audit.AuditRunUpdateSupport.words(tec, OTHER, facts) })
+            assertEquals(1, asked, "the agent is off for that tenant: the model is not asked")
+        } finally {
+            AuditRunWriter.gatewayFor = previous
+        }
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    /** work on a fresh thread with no one signed in and no tenant active (an automation run's context). */
+    private Object anonymously(Closure work) {
+        Map holder = [:]
+        Thread worker = new Thread({
+            ExecutionContext tec = Moqui.getExecutionContextFactory().getExecutionContext()
+            try { holder.result = work.call(tec) } catch (Throwable t) { holder.failure = t } finally { tec.destroy() }
+        } as Runnable, "agent-anonymous")
+        worker.start()
+        worker.join()
+        if (holder.failure) throw (Throwable) holder.failure
+        return holder.result
+    }
 
     /**
      * One send#AgentTurn on a fresh thread with authz ON (the BrainChangeTicketSmokeTests pattern), logged in as username

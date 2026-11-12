@@ -48,7 +48,9 @@ class AgentOrchestratorTests {
     private static final Timestamp FROM = Timestamp.valueOf("2026-04-21 00:00:00")
     private static final List<String> AGENT_ENTITIES = ["darpan.agent.AgentMessage", "darpan.agent.AgentTurn", "darpan.agent.AuditChangeProposal",
             "darpan.agent.BrainChangeTicket", "darpan.agent.AgentConversation"]
-    private static final List<String> PROMPTS = ["router", "investigator", "author"].collect { "darpan/agent/prompts/${it}.md".toString() }
+    private static final List<String> ROLE_PROMPTS = ["router", "investigator", "author"].collect { "darpan/agent/prompts/${it}.md".toString() }
+    /** The role prompts and the audit run words prompt (DAR-BE-207): all sent to the model, so all checked for leaks. */
+    private static final List<String> PROMPTS = ROLE_PROMPTS + ["darpan/agent/prompts/audit-run-words.md"]
     private static final List<String> SCHEMAS = ["router-items", "evidence", "propose-exclusion", "propose-statement-narrowing", "propose-fix-text",
             "propose-conclusion-rows", "raise-ticket"].collect { "darpan/agent/schemas/${it}.json".toString() } +
             ["darpan/agent/tools.json"]
@@ -1023,7 +1025,7 @@ class AgentOrchestratorTests {
             assertFalse(host.find(), "${path} holds a host-like token")
             assertFalse(body.contains("@"), "${path} holds an @")
         }
-        PROMPTS.each { assertTrue(resource(it).contains("| How a finding reads |"), "${it} ends with the lever table") }
+        ROLE_PROMPTS.each { assertTrue(resource(it).contains("| How a finding reads |"), "${it} ends with the lever table") }
     }
 
     private static String resource(String path) {

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-BE-207. Core's audit run update (darpan.audit.AuditRunUpdateSupport.words) asks for this by name when it is defined;
+         core never imports this component. Internal only: called after an automation run, where no one is signed in. -->
+
+    <service verb="write" noun="AuditRunWords" authenticate="anonymous-all" allow-remote="false" transaction="ignore">
+        <description>The words of an audit run update, by Claude Haiku from the run's fact sheet: a headline and one next-step
+            sentence per cause group, each checked against the fact sheet (darpan.agent.AuditRunWriter). Empty when the agent is
+            off for the tenant (deployment switch, TenantSetting.agentEnabled) or the model gave nothing usable; then the email
+            shows each cause's own fix and no headline.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="facts" type="Map" required="true"><description>darpan.audit.AuditRunFacts.build</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="headline"/>
+            <parameter name="fixes" type="Map"><description>{"&lt;rule&gt;|&lt;cause&gt;": sentence}</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="words" from="darpan.agent.AuditRunWriter.write(ec, companyUserGroupId, facts)"/>
+            <set field="headline" from="words.headline"/>
+            <set field="fixes" from="words.fixes ?: [:]"/>
+        </actions>
+    </service>
+
+</services>
