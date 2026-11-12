@@ -37,6 +37,11 @@ configurations.all {
             // jackson-annotations is released as 2.21 (no patch), per jackson-bom 2.21.2.
             details.useVersion(details.requested.name == 'jackson-annotations' ? '2.21' : '2.21.2')
         }
+        // DAR-BE-244: the AWS SDK asks for reactive-streams 1.0.4; darpan already ships 1.0.3 (same API). Use darpan's, so
+        // copyDependencies leaves it out of lib/ instead of putting a second copy on the shared classpath.
+        if (details.requested.group == 'org.reactivestreams' && details.requested.name == 'reactive-streams') {
+            details.useVersion('1.0.3')
+        }
     }
 }
 
@@ -45,6 +50,15 @@ dependencies {
     // Moqui loads darpan on the shared classloader; compile against it only (moqui-gql style).
     compileOnly project(':runtime:component:darpan')
     implementation 'com.anthropic:anthropic-java:3.2.0'
+    // DAR-BE-244: mints the AWS-signed JWT for Anthropic workload identity federation (sts:GetWebIdentityToken) with the
+    // task role's credentials. Apache-2.0; only the JDK URLConnection HTTP client (the Apache 5 and Netty clients are
+    // excluded), so the sync STS call adds no HTTP stack of its own.
+    implementation('software.amazon.awssdk:sts:2.58.0') {
+        exclude group: 'software.amazon.awssdk', module: 'apache5-client'
+        exclude group: 'software.amazon.awssdk', module: 'apache-client'
+        exclude group: 'software.amazon.awssdk', module: 'netty-nio-client'
+    }
+    implementation 'software.amazon.awssdk:url-connection-client:2.58.0'
 
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'
     testImplementation project(':runtime:component:darpan')
