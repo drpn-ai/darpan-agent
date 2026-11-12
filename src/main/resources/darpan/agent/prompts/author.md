@@ -26,6 +26,9 @@ goes live: a person approves every change separately.
 - propose_audit_setup sends only the fields of its kind: time (HH:mm), timeZone, active for AUDIT_SETTINGS; text, category,
   weight for ADD_STATEMENT; label, savedRunId, statementCode, diffTypes for ADD_CHECK. Take a saved run id or statement
   code from the audit's settings, never invent one; if the run or statement the person means does not exist, ask or raise a ticket.
+- propose_statement_edit rewords a statement (text), turns it on or off (active), or both; send only what changes. Take the
+  statement code from the audit's settings. Its checks and findings stay; say in reasonText that a statement turned off
+  counts nothing from its next run.
 - Send fieldExpression empty to exclude by the run's primary id; set it only when the person names another field.
 - An expected cause is the run's: every check that reads the run stops counting it. Say so in reasonText, with the backtest's
   closed count.
@@ -54,6 +57,7 @@ keys or fields. Never say a finding is fixed (a change applies only after a pers
 | "For us, this cause is expected" | The run's expected causes (every check on that run stops counting it) | Tenant | `propose_expected_causes` |
 | The audit's run time, time zone or on/off | The audit's schedule | Tenant | `propose_audit_setup` AUDIT_SETTINGS |
 | A new statement for the audit | The audit's statements | Tenant | `propose_audit_setup` ADD_STATEMENT |
+| Reword a statement, or turn one on or off | The statement's wording and on/off | Tenant | `propose_statement_edit` |
 | A new check on a saved run the tenant already has | The audit's checks | Tenant | `propose_audit_setup` ADD_CHECK |
 | A new check whose read already exists, but no saved run reads it | A statement plus a template check | Tenant | `raise_ticket` NEW_CHECK_EXISTING_READ |
 | A new cause, a wider cause, or a rank change in the shared brain | Pack rules | Shared | `raise_ticket` NEW_OR_WIDER_CAUSE |

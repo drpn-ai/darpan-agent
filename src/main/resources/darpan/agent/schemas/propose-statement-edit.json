@@ -1,0 +1,59 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "auditId",
+    "statementCode",
+    "reasonText",
+    "evidence"
+  ],
+  "properties": {
+    "auditId": {
+      "type": "string"
+    },
+    "statementCode": {
+      "type": "string",
+      "description": "The audit's statement to change, as its settings name it (for example R2)."
+    },
+    "text": {
+      "type": "string",
+      "description": "The statement's new wording, one sentence; leave out to keep it."
+    },
+    "active": {
+      "type": "boolean",
+      "description": "false to turn the statement off, true to turn it back on; leave out to keep it."
+    },
+    "reasonText": {
+      "type": "string",
+      "description": "Why, citing the person's words; at most 1000 characters."
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field",
+          "value",
+          "source"
+        ],
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "HUMAN",
+              "CONFIG",
+              "TOOL"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

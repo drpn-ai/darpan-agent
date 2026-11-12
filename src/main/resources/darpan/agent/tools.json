@@ -126,6 +126,15 @@
     "input_schema_resource": "darpan/agent/schemas/propose-audit-setup.json"
   },
   {
+    "name": "propose_statement_edit",
+    "service": "facade.AgentChangeFacadeServices.create#AuditChangeProposal",
+    "conversationScoped": true,
+    "strict": false,
+    "description": "Drafts rewording one of the audit's statements, turning it on or off, or both (STATEMENT_EDIT). Its checks and findings stay; a statement turned off counts nothing from its next run. Send text only to reword and active only to switch. Nothing changes until a person approves it. Every record id in the wording must be one the person typed or already in the audit's statements; any other blocks the draft.",
+    "proposal": {"kind": "STATEMENT_EDIT", "target": ["auditId", "statementCode"], "after": ["text", "active"]},
+    "input_schema_resource": "darpan/agent/schemas/propose-statement-edit.json"
+  },
+  {
     "name": "raise_ticket",
     "service": "facade.AgentChangeFacadeServices.create#BrainChangeTicket",
     "conversationScoped": true,

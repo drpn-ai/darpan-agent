@@ -92,6 +92,19 @@ class AgentProposalToolTests {
     }
 
     @Test
+    void "the statement edit tool names the statement in the target and sends only what changes, false included"() {
+        Map off = proposal("propose_statement_edit", [auditId: "A1", statementCode: "R7", active: false, reasonText: "x", evidence: []])
+        assertEquals([kind: "STATEMENT_EDIT", target: [auditId: "A1", statementCode: "R7"], after: [active: false], reasonText: "x", evidence: []], off)
+        Map reword = proposal("propose_statement_edit", [auditId: "A1", statementCode: "R2", text: "Refunded returns are received within 5 days.",
+                                                         reasonText: "x", evidence: EVIDENCE])
+        assertEquals([kind: "STATEMENT_EDIT", target: [auditId: "A1", statementCode: "R2"], after: [text: "Refunded returns are received within 5 days."],
+                      reasonText: "x", evidence: EVIDENCE], reword)
+        Map schema = (Map) AgentToolExecutor.TOOLS["propose_statement_edit"].get("input_schema")
+        assertTrue(AgentToolExecutor.validate(schema, [auditId: "A1", statementCode: "R2", active: true, reasonText: "x", evidence: []]).isEmpty())
+        assertFalse(AgentToolExecutor.validate(schema, [auditId: "A1", active: true, reasonText: "x", evidence: []]).isEmpty(), "the statement is required")
+    }
+
+    @Test
     void "an empty required value is left out so the core refuses it as missing"() {
         Map p = proposal("propose_exclusion", [savedRunId: "", fileSide: "FILE_1", fieldExpression: "", filterValues: [], reasonText: "x", evidence: []])
         assertFalse(((Map) p.target).containsKey("savedRunId"))
@@ -122,7 +135,7 @@ class AgentProposalToolTests {
     void "every proposal tool maps to the one proposal service and is read by the author as a proposal"() {
         List<String> tools = AgentToolExecutor.TOOLS.findAll { k, v -> v.proposal != null }.keySet() as List
         assertEquals(["propose_audit_setup", "propose_conclusion_rows", "propose_exclusion", "propose_expected_causes", "propose_fix_text",
-                      "propose_statement_narrowing"], tools.sort())
+                      "propose_statement_edit", "propose_statement_narrowing"], tools.sort())
         tools.each { String t ->
             assertEquals("facade.AgentChangeFacadeServices.create#AuditChangeProposal", AgentToolExecutor.serviceOf(t), t)
             assertTrue(AgentToolExecutor.isProposalTool(t), t)

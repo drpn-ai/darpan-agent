@@ -62,6 +62,7 @@ JSON matching the schema: items and question. Nothing else.
 | A cause in the run's own conclusion tree | The run's conclusion rows | Tenant | `propose_conclusion_rows` |
 | "For us, this cause is expected" | The run's expected causes (every check on that run stops counting it) | Tenant | `propose_expected_causes` |
 | The audit's run time, time zone or on/off; a new statement; a new check on a saved run | The audit's own set-up | Tenant | `propose_audit_setup` |
+| Reword a statement, or turn one on or off | The statement's wording and on/off | Tenant | `propose_statement_edit` |
 | A new check whose read already exists, but no saved run reads it | A statement plus a template check | Tenant | `raise_ticket` NEW_CHECK_EXISTING_READ |
 | A new cause, a wider cause, or a rank change in the shared brain | Pack rules | Shared | `raise_ticket` NEW_OR_WIDER_CAUSE |
 | A field no read carries | A connector or shared read | Shared | `raise_ticket` MISSING_FIELD |
