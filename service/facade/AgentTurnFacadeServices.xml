@@ -14,7 +14,8 @@
             INCOMPLETE, TENANT_CHANGED or ERROR.</description>
         <in-parameters>
             <parameter name="conversationId"><description>Continue this conversation; empty starts one.</description></parameter>
-            <parameter name="auditId" required="true"/>
+            <parameter name="auditId"><description>The audit's row id; or name it by auditCode. Exactly one of the two.</description></parameter>
+            <parameter name="auditCode"><description>The audit's code (the JSON audit id, e.g. month-close), looked up in the active tenant.</description></parameter>
             <parameter name="findingId"><description>The finding the panel is open on.</description></parameter>
             <!-- Pasted investigations may hold angle brackets; the text is stored and shown as plain text, never as HTML. -->
             <parameter name="text" required="true" allow-html="any"/>
@@ -29,7 +30,7 @@
             <parameter name="masked" type="List"><description>The kinds of secret or personal data masked in the text (never the values).</description></parameter>
         </out-parameters>
         <actions>
-            <set field="turn" from="darpan.agent.AgentOrchestrator.forRequest(ec).send(ec, conversationId, auditId, findingId, text)"/>
+            <set field="turn" from="darpan.agent.AgentOrchestrator.forRequest(ec).send(ec, conversationId, auditId, findingId, text, auditCode)"/>
             <if condition="turn == null || ec.message.hasError()"><return error="true"/></if>
             <set field="conversationId" from="turn.conversationId"/>
             <set field="outcome" from="turn.outcome"/>

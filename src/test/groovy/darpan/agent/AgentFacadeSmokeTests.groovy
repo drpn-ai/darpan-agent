@@ -114,6 +114,33 @@ class AgentFacadeSmokeTests {
 
     }
 
+    // DAR-UI-104: the audit page knows its audit by code (the JSON audit id); the row id is never shown. A code is looked up
+    // in the active tenant only, and a message names exactly one of the two.
+    @Test
+    void "send#AgentTurn finds the audit by its code in the active tenant only"() {
+        asSystem {
+            ec.entity.find("darpan.agent.AgentAccessGrantEvent").deleteAll()
+            ec.entity.find("darpan.agent.AgentAccessGrant").condition("companyUserGroupId", MINE).deleteAll()
+        }
+        def idle = new AgentRoleLoopTests.ScriptedGateway([])
+
+        // No AI access in MINE: the turn stops at the access check, which comes after the audit is found.
+        Map mine = onThread(USERNAME, MINE, [auditCode: "weekly", text: "Why is this one open?"], idle)
+        assertNull(mine.failure, String.valueOf(mine.failure))
+        assertFalse(mine.hasError as boolean, "the tenant's own audit code resolves: ${mine.errors}")
+        assertNotNull(mine.result.outcome)
+
+        Map foreign = onThread(USERNAME, OTHER, [auditCode: "weekly", text: "Why is this one open?"], idle)
+        assertTrue(foreign.hasError as boolean, "another tenant's audit code reads as not found")
+        assertTrue((foreign.errors as List).any { (it as String).contains("was not found") }, foreign.errors.toString())
+
+        Map neither = onThread(USERNAME, MINE, [text: "Why is this one open?"], idle)
+        assertTrue(neither.hasError as boolean, "a message names an audit")
+        Map both = onThread(USERNAME, MINE, [auditId: AUDIT, auditCode: "weekly", text: "Why is this one open?"], idle)
+        assertTrue(both.hasError as boolean, "a message names the audit once")
+        assertEquals(0, idle.sent.size(), "no model is called")
+    }
+
     @Test
     void "on with no key, send#AgentTurn answers AGENT_UNAVAILABLE and writes nothing"() {
         assumeTrue(AgentClientFactory.resolveKey() == null, "an Anthropic key is configured on this machine; the no-key case cannot be shown")

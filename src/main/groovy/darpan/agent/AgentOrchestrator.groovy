@@ -130,7 +130,7 @@ class AgentOrchestrator {
      * The person's message, answered in this request. Null with an error on ec.message when the input is refused (no
      * tenant, an audit, finding or conversation that is not the tenant's, empty or overlong text).
      */
-    Map send(def ec, String conversationId, String auditId, String findingId, String text) {
+    Map send(def ec, String conversationId, String auditId, String findingId, String text, String auditCode = null) {
         String state = availability.call(ec)
         if (state != AgentSwitch.ON) return response(conversationId, state ?: AgentSwitch.AGENT_OFF, unavailableReply(state))
 
@@ -139,8 +139,12 @@ class AgentOrchestrator {
         if (!pinned || !userId) { ec.message.addError("No active tenant."); return null }
         if (!text?.trim()) { ec.message.addError("Say what you want to know or change."); return null }
         if (text.length() > MAX_TEXT_CHARS) { ec.message.addError("The message is longer than ${MAX_TEXT_CHARS} characters; send it in parts.".toString()); return null }
-        def audit = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.Audit", "auditId", auditId, pinned, WHY)
-        if (audit == null) { ec.message.addError("Audit ${auditId} was not found.".toString()); return null }
+        if (!auditId == !auditCode) { ec.message.addError("Name the audit by its id or by its code, not both."); return null }
+        def audit = auditId ? TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.Audit", "auditId", auditId, pinned, WHY)
+                : TenantScopedFinder.findTenantScoped(ec, "darpan.audit.Audit").condition("auditCode", auditCode).useCache(false).one()
+        if (audit == null || audit.companyUserGroupId != pinned) { ec.message.addError("Audit ${auditId ?: auditCode} was not found.".toString()); return null }
+        // DAR-UI-104: the audit page names its audit by code; everything below keys on the row id.
+        auditId = audit.auditId as String
         if (findingId && !findingOfAudit(ec, pinned, auditId, findingId)) {
             ec.message.addError("Finding ${findingId} was not found in audit ${auditId}.".toString()); return null
         }
