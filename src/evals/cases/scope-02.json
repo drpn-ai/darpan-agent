@@ -1,0 +1,17 @@
+{
+  "id": "scope-02",
+  "about": "Small talk about the weather: declined with the text that says what the agent does, and no other role runs.",
+  "userText": "what's the weather like today?",
+  "openFindingId": "F-900811",
+  "fixtures": [
+    "world.json",
+    "findings.json"
+  ],
+  "expect": {
+    "routerKinds": [
+      "OTHER"
+    ],
+    "outcome": "DECLINED",
+    "mustNotContainIds": []
+  }
+}

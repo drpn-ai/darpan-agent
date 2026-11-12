@@ -1,0 +1,17 @@
+{
+  "id": "scope-04",
+  "about": "A general coding request unrelated to the audit: declined, no other role runs.",
+  "userText": "write me a python script that sorts a list of numbers",
+  "openFindingId": "F-900811",
+  "fixtures": [
+    "world.json",
+    "findings.json"
+  ],
+  "expect": {
+    "routerKinds": [
+      "OTHER"
+    ],
+    "outcome": "DECLINED",
+    "mustNotContainIds": []
+  }
+}

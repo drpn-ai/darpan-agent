@@ -1,0 +1,17 @@
+{
+  "id": "scope-05",
+  "about": "General knowledge about another company: declined, no other role runs.",
+  "userText": "who is the CEO of Shopify?",
+  "openFindingId": "F-900811",
+  "fixtures": [
+    "world.json",
+    "findings.json"
+  ],
+  "expect": {
+    "routerKinds": [
+      "OTHER"
+    ],
+    "outcome": "DECLINED",
+    "mustNotContainIds": []
+  }
+}

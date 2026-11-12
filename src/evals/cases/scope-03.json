@@ -1,0 +1,17 @@
+{
+  "id": "scope-03",
+  "about": "A greeting with nothing to do: declined, no other role runs.",
+  "userText": "hi, how are you doing?",
+  "openFindingId": "F-900811",
+  "fixtures": [
+    "world.json",
+    "findings.json"
+  ],
+  "expect": {
+    "routerKinds": [
+      "OTHER"
+    ],
+    "outcome": "DECLINED",
+    "mustNotContainIds": []
+  }
+}
