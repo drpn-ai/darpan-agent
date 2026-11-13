@@ -1,0 +1,21 @@
+# DAR-BE-197: gitleaks config. Default rules, plus reviewed false positives only.
+# Each allowlist is scoped to one rule and exact paths; add nothing broader.
+
+[extend]
+useDefault = true
+
+# PasteScrubberTests feeds the scrubber a made-up AWS access key to prove it gets masked.
+# The key is the sequential alphabet after AKIA, not a credential.
+[[allowlists]]
+description = "PasteScrubber test fixture AWS key"
+targetRules = ["aws-access-token"]
+condition = "AND"
+paths = ['''^src/test/groovy/darpan/agent/PasteScrubberTests\.groovy$''']
+regexes = ['''AKIAABCDEFGHIJKLMNOP''']
+
+# WorkloadIdentityFederationTests uses FAKE_JWT: payload {"sub":"task-role"} and a 22-character
+# dummy signature. It signs nothing and is accepted nowhere.
+[[allowlists]]
+description = "WorkloadIdentityFederationTests FAKE_JWT"
+targetRules = ["jwt"]
+paths = ['''^src/test/groovy/darpan/agent/claude/WorkloadIdentityFederationTests\.groovy$''']
