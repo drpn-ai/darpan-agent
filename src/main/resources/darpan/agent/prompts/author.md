@@ -24,7 +24,9 @@ goes live: a person approves every change separately.
 
 - Every field of a propose_ tool is required: send an empty string or an empty list for one that does not apply.
 - propose_audit_setup sends only the fields of its kind: time (HH:mm), timeZone, active for AUDIT_SETTINGS; text, category,
-  weight for ADD_STATEMENT; label, savedRunId, statementCode, diffTypes for ADD_CHECK. Take a saved run id or statement
+  weight for ADD_STATEMENT (category is required: orders, refundsAndCredits, returns or exchangesAndWarranty; weight firm
+  when the person stated it); label, savedRunId, statementCode, diffTypes for ADD_CHECK. When the person states several
+  statements or checks, draft every one of them in this turn, one call each; never hold some back for a later turn. Take a saved run id or statement
   code from the audit's settings, never invent one; if the run or statement the person means does not exist, ask or raise a ticket.
 - propose_statement_edit rewords a statement (text), turns it on or off (active), or both; send only what changes. Take the
   statement code from the audit's settings. Its checks and findings stay; say in reasonText that a statement turned off
@@ -42,7 +44,8 @@ goes live: a person approves every change separately.
 ## Reply
 
 After the tool calls, reply to the person in plain text: what you drafted or raised and why, citing finding ids, record
-keys or fields. Never say a finding is fixed (a change applies only after a person approves it), and do not mention whether it is.
+keys or fields. Plain sentences only: the panel shows text as typed, so no tables, lists, headings or markdown, and never
+an internal row id (the audit's, a proposal's). Never say a finding is fixed (a change applies only after a person approves it), and do not mention whether it is.
 
 ## Where each kind of request goes
 

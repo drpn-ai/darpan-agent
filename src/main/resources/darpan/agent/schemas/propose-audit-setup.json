@@ -38,11 +38,11 @@
     },
     "category": {
       "type": "string",
-      "description": "ADD_STATEMENT: the statement's category code."
+      "description": "ADD_STATEMENT, required: orders, refundsAndCredits, returns or exchangesAndWarranty."
     },
     "weight": {
       "type": "string",
-      "description": "ADD_STATEMENT: the statement's weight code; leave out for the default."
+      "description": "ADD_STATEMENT: firm (the person said it) or derived (awaits their confirmation); empty for derived."
     },
     "label": {
       "type": "string",
