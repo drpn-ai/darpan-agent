@@ -873,20 +873,23 @@ class AgentOrchestratorTests {
     }
 
     @Test
-    void "a view-only person's proposal stays DRAFT for an editor"() {
-        asSystem { setPermission(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID) }
-        actAs(MINE)
-        String words = "CM-2002 is a test memo; leave it out."
-        def g = new AgentRoleLoopTests.ScriptedGateway([
-                router([item("CAUSE_FEEDBACK", words)]),
-                evidence([fact("savedRunId", runId, "CONFIG")]),
-                authorSays([toolUse("tu_1", "propose_exclusion", exclusionFor("CM-2002"))]),
-                authorEnds("Drafted an exclusion of CM-2002.")])
-        Map out = send(new AgentOrchestrator(g, AVAILABLE), words)
-        Map p = (Map) ((List) out.proposals)[0]
-        assertEquals("DRAFT", p.status, p.toString())
-        assertEquals("An editor must plan and approve this change.", p.statusMessage)
-        assertEquals("PASS", p.provenanceStatus)
+    // DAR-BE-292 (Aditi's permissions sheet): only editors and tenant admins talk to the agent. A view-only member and a
+    // tenant user are refused before anything is stored or sent to the model.
+    void "a view-only member and a tenant user cannot talk to the agent"() {
+        asSystem {
+            upsert("moqui.security.UserGroup", [userGroupId: TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID,
+                    description: "Can run for the tenant", groupTypeEnumId: "UgtDarpanPermission"])
+        }
+        [TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID, TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID].each { String role ->
+            asSystem { setPermission(role) }
+            actAs(MINE)
+            def g = new AgentRoleLoopTests.ScriptedGateway([])
+            Map out = new AgentOrchestrator(g, AVAILABLE).send(ec, null, AUDIT, FINDING, "CM-2002 is a test memo; leave it out.")
+            assertNull(out, role)
+            assertEquals("Only editors and tenant admins can talk to the agent.", ec.message.errorsString?.trim(), role)
+            assertEquals(0, g.sent.size(), role)
+            ec.message.clearAll()
+        }
     }
 
     @Test
