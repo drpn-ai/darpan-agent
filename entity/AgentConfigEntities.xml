@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- DAR-BE-307. Production EDITS of the agent's non-scalar config. A row is an edit; the shipped default lives in the jar
+         (darpan.agent.config.AgentConfigDefaults) and a reset deletes the row. No data file seeds these tables: the container
+         entrypoint upserts every seed file on each boot, which would overwrite an edit. Scalars are DarpanSetting rows in the
+         agent's settings catalog, not here. Reads go through darpan.agent.config.AgentConfig (a 30 s snapshot); an invalid row
+         (direct DB edit) is ignored and its default applies. -->
+
+    <entity entity-name="AgentPrompt" package="darpan.agent" use="configuration" cache="never">
+        <description>An edited system prompt. promptId is router, investigator, author, email-smile or audit-run-words.</description>
+        <field name="promptId" type="id-long" is-pk="true"/>
+        <field name="promptText" type="text-very-long" not-null="true"/>
+        <field name="defaultSha256" type="text-short"><description>Hash of the shipped default when the edit was saved, so a later change to the default can be flagged.</description></field>
+        <field name="lastChangedByUserId" type="id"/>
+        <field name="lastChangedDate" type="date-time"/>
+    </entity>
+
+    <entity entity-name="AgentPromptVersion" package="darpan.agent" use="configuration" cache="never">
+        <description>History of prompt edits, one row per save. A null promptText is a reset to the shipped default.</description>
+        <field name="promptVersionId" type="id" is-pk="true"/>
+        <field name="promptId" type="id-long"/>
+        <field name="promptText" type="text-very-long"/>
+        <field name="changedByUserId" type="id"/>
+        <field name="changedDate" type="date-time"/>
+    </entity>
+
+    <entity entity-name="AgentRoleConfig" package="darpan.agent" use="configuration" cache="never">
+        <description>An edited role-to-model choice (ROUTER, INVESTIGATOR, AUTHOR, AUTHOR_ESCALATION, EMAIL_SMILE, AUDIT_RUN_WORDS).</description>
+        <field name="roleId" type="id-long" is-pk="true"/>
+        <field name="modelId" type="text-short" not-null="true"/>
+        <field name="lastChangedByUserId" type="id"/>
+        <field name="lastChangedDate" type="date-time"/>
+    </entity>
+
+    <entity entity-name="AgentModelPrice" package="darpan.agent" use="configuration" cache="never">
+        <description>A model's price in dollars per million tokens: a new model, or an edit of a shipped one.</description>
+        <field name="modelId" type="text-short" is-pk="true"/>
+        <field name="inputUsdPerMTok" type="number-decimal" not-null="true"/>
+        <field name="outputUsdPerMTok" type="number-decimal" not-null="true"/>
+        <field name="cacheReadUsdPerMTok" type="number-decimal" not-null="true"/>
+        <field name="cacheWriteUsdPerMTok" type="number-decimal" not-null="true"/>
+        <field name="lastChangedByUserId" type="id"/>
+        <field name="lastChangedDate" type="date-time"/>
+    </entity>
+
+    <entity entity-name="AgentTenantCap" package="darpan.agent" use="configuration" cache="never">
+        <description>One tenant's daily dollar cap, overriding the setting darpan.agent.dailyUsdCapPerTenant. Keyed by tenant, so it is
+            not a DarpanSetting row. It carries no DARPAN_ACTIVE_COMPANY_SCOPE filter: AgentConfig loads every row and answers by an
+            explicit companyUserGroupId.</description>
+        <field name="companyUserGroupId" type="id" is-pk="true"/>
+        <field name="dailyUsdCap" type="number-decimal" not-null="true"/>
+        <field name="lastChangedByUserId" type="id"/>
+        <field name="lastChangedDate" type="date-time"/>
+    </entity>
+</entities>
