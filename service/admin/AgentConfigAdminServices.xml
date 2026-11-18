@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-307. List, show, edit and reset the agent's prompts, role models, model prices, texts and per-tenant daily caps (the edit
+  rows read through darpan.agent.config.AgentConfig), for Darpan admins (super admins). admin.* and therefore inside the
+  DARPAN_ADMIN_API fence; each service checks super admin again first. No fresh two-factor code: super-admin sign-in is enough and
+  every write is audit-logged. An edit that breaks a rule is refused with the reason and nothing is saved. A change is used from the
+  next turn on this node and within 30 seconds on the others; a model change is checked by the preflight on that next turn, so
+  nothing here calls the model API. The agent's numbers (budgets, timeouts, caps) are not here: they are settings
+  (admin.SettingAdminServices). The work is darpan.agent.config.AgentConfigAdmin.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="AgentConfig" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
+        <description>Everything editable about the agent except its numbers: prompts (promptId, edited, defaultChangedSinceEdit, chars,
+            lastChangedByUserId, lastChangedDate), roles (roleId, modelId, defaultModelId, edited), prices (modelId, the four prices,
+            source DEFAULT, EDITED or ADDED, usedBy), globalDailyUsdCap (effectiveValue, source, min, max; read only), tenantCaps and texts
+            (textId, text, defaultText, tokens, maxChars, edited, defaultChangedSinceEdit).</description>
+        <out-parameters>
+            <parameter name="config" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="config" from="[:]"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="got" from="darpan.agent.config.AgentConfigAdmin.getAgentConfig(ec)"/>
+            <set field="config" from="got.config"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="AgentPrompt" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
+        <description>One prompt: promptId, text, defaultText, edited, defaultChangedSinceEdit and its newest 10 versions
+            (promptVersionId, text, changedByUserId, changedDate, reset). An unknown id is an error.</description>
+        <in-parameters>
+            <parameter name="promptId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="prompt" type="Map"/>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="got" from="darpan.agent.config.AgentConfigAdmin.getAgentPrompt(ec, promptId)"/>
+            <if condition="got.error"><return error="true" message="${got.error}"/></if>
+            <set field="prompt" from="got.prompt"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="AgentPrompt" allow-remote="true" authenticate="true">
+        <description>Saves a prompt. Refused, with the reason and nothing saved: an unknown id, an empty prompt, one over 100000
+            characters, or one that names a tenant (prompts are shared by every tenant). Saving the shipped text stores no edit
+            (an existing edit is dropped). Every save writes a version row; the audit row says how long the prompt is, not what
+            it says.</description>
+        <in-parameters>
+            <parameter name="promptId" required="true"/>
+            <parameter name="promptText" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="prompt" type="Map"/>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="saved" from="darpan.agent.config.AgentConfigAdmin.updateAgentPrompt(ec, promptId, promptText)"/>
+            <if condition="saved.error"><return error="true" message="${saved.error}"/></if>
+            <set field="prompt" from="saved.prompt"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="AgentRoleModel" allow-remote="true" authenticate="true">
+        <description>Points a role (ROUTER, INVESTIGATOR, AUTHOR, AUTHOR_ESCALATION, EMAIL_SMILE, AUDIT_RUN_WORDS) at a model. Refused:
+            an unknown role, a malformed model id, a model with no price, and none for any role but AUTHOR_ESCALATION. The next turn
+            re-checks the model with the provider.</description>
+        <in-parameters>
+            <parameter name="roleId" required="true"/>
+            <parameter name="modelId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="role" type="Map"/>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="saved" from="darpan.agent.config.AgentConfigAdmin.updateAgentRoleModel(ec, roleId, modelId)"/>
+            <if condition="saved.error"><return error="true" message="${saved.error}"/></if>
+            <set field="role" from="saved.role"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="AgentModelPrice" allow-remote="true" authenticate="true">
+        <description>Adds a model's price or edits a shipped one, in dollars per million tokens. Input and output above 0, cache prices
+            0 or more, none above 1000.</description>
+        <in-parameters>
+            <parameter name="modelId" required="true"/>
+            <parameter name="inputUsdPerMTok" required="true"/>
+            <parameter name="outputUsdPerMTok" required="true"/>
+            <parameter name="cacheReadUsdPerMTok" required="true"/>
+            <parameter name="cacheWriteUsdPerMTok" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="price" type="Map"/>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="saved" from="darpan.agent.config.AgentConfigAdmin.updateAgentModelPrice(ec, modelId, inputUsdPerMTok, outputUsdPerMTok, cacheReadUsdPerMTok, cacheWriteUsdPerMTok)"/>
+            <if condition="saved.error"><return error="true" message="${saved.error}"/></if>
+            <set field="price" from="saved.price"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="AgentText" allow-remote="true" authenticate="true">
+        <description>Saves an agent text (a tool description, a reply or a notice). It must keep the default's {tokens}, be plain text
+            and stay within its length cap. The audit row carries the old and new words.</description>
+        <in-parameters>
+            <parameter name="textId" required="true"/>
+            <parameter name="text" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="text" type="Map"/>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="saved" from="darpan.agent.config.AgentConfigAdmin.updateAgentText(ec, textId, text)"/>
+            <if condition="saved.error"><return error="true" message="${saved.error}"/></if>
+            <set field="text" from="saved.text"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="AgentTenantDailyCap" allow-remote="true" authenticate="true">
+        <description>Sets one tenant's daily dollar cap for the agent, replacing the global cap
+            (darpan.agent.dailyUsdCapPerTenant) for that tenant. It must be a number inside the global cap's range, and the tenant must
+            exist.</description>
+        <in-parameters>
+            <parameter name="tenantUserGroupId" required="true"/>
+            <parameter name="dailyUsdCap" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="tenantCap" type="Map"/>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="saved" from="darpan.agent.config.AgentConfigAdmin.updateAgentTenantDailyCap(ec, tenantUserGroupId, dailyUsdCap)"/>
+            <if condition="saved.error"><return error="true" message="${saved.error}"/></if>
+            <set field="tenantCap" from="saved.tenantCap"/>
+        </actions>
+    </service>
+
+    <service verb="reset" noun="AgentConfigItem" allow-remote="true" authenticate="true">
+        <description>Deletes an edit so the item follows its shipped default again. kind is PROMPT, ROLE_MODEL, PRICE, TEXT or
+            TENANT_CAP; id is the prompt, role, model, text or tenant id. Nothing to reset: nothing changes and no audit row. A price
+            added by an admin cannot be reset while a role uses its model. A prompt reset also writes a null version row.</description>
+        <in-parameters>
+            <parameter name="kind" required="true"/>
+            <parameter name="id" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="reset" type="Map"/>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="done" from="darpan.agent.config.AgentConfigAdmin.resetAgentConfigItem(ec, kind, id)"/>
+            <if condition="done.error"><return error="true" message="${done.error}"/></if>
+            <set field="reset" from="done.reset"/>
+        </actions>
+    </service>
+</services>
