@@ -208,7 +208,7 @@ class AgentEvalRunner {
     /** The eval JVM's agent settings: switch on, no hourly limit in the way, and the budget as the tenant's daily cap. */
     static void configureAgent(BigDecimal budgetUsd) {
         System.setProperty(AgentSwitch.ENABLED_PROPERTY, "true")
-        System.setProperty(AgentOrchestrator.TURNS_PER_HOUR_PROPERTY, "100000")
+        System.setProperty(AgentOrchestrator.TURNS_PER_HOUR_PROPERTY, "1000")
         System.setProperty(AgentOrchestrator.DAILY_CAP_PROPERTY, budgetUsd.toPlainString())
     }
 

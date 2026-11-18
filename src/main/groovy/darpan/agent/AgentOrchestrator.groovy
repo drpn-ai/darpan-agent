@@ -1,5 +1,6 @@
 package darpan.agent
 
+import darpan.config.DarpanSettings
 import com.anthropic.models.messages.CacheControlEphemeral
 import com.anthropic.models.messages.ContentBlockParam
 import com.anthropic.models.messages.MessageParam
@@ -58,9 +59,7 @@ class AgentOrchestrator {
     static final int MAX_TEXT_CHARS = 20_000
     static final int EARLIER_TURNS = 4
     static final String TURNS_PER_HOUR_PROPERTY = "darpan.agent.turnsPerUserPerHour"
-    static final int DEFAULT_TURNS_PER_HOUR = 20
     static final String DAILY_CAP_PROPERTY = "darpan.agent.dailyUsdCapPerTenant"
-    static final BigDecimal DEFAULT_DAILY_CAP_USD = 25G
 
     static final String DECLINE = "That is outside what I can do here. I create and maintain this tenant's audit checks: setting up an audit, its statements and checks, why a finding is open or closed, and changes to their rules, exclusions, fix wording and causes. Ask about one of those."
     /** The reply when a turn would otherwise end with nothing for the person: never an empty answer. */
@@ -713,19 +712,10 @@ class AgentOrchestrator {
                 .condition("startedDate", EntityCondition.GREATER_THAN_EQUAL_TO, since).useCache(false).count()
     }
 
-    static int turnsPerHour() {
-        try { return Math.max(1, Integer.parseInt(System.getProperty(TURNS_PER_HOUR_PROPERTY)?.trim() ?: "")) }
-        catch (NumberFormatException ignored) { return DEFAULT_TURNS_PER_HOUR }
-    }
+    static int turnsPerHour() { return DarpanSettings.intValue(TURNS_PER_HOUR_PROPERTY) }
 
-    static BigDecimal dailyCapUsd() {
-        try {
-            BigDecimal v = new BigDecimal(System.getProperty(DAILY_CAP_PROPERTY)?.trim() ?: "")
-            return v > 0 ? v : DEFAULT_DAILY_CAP_USD
-        } catch (NumberFormatException ignored) {
-            return DEFAULT_DAILY_CAP_USD
-        }
-    }
+    /** The one read of the global daily cap (DAR-BE-307 wraps this for a per-tenant override). */
+    static BigDecimal dailyCapUsd() { return DarpanSettings.decimalValue(DAILY_CAP_PROPERTY) }
 
     static boolean overDailyCap(def ec, String pinned) {
         return AgentUsageLedger.todayCostMicros(ec, pinned) >= (dailyCapUsd() * 1_000_000G).longValue()
