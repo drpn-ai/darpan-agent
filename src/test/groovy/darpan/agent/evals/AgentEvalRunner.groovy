@@ -10,7 +10,10 @@ import darpan.agent.AgentRedaction
 import darpan.agent.AgentSwitch
 import darpan.agent.claude.AnthropicModelGateway
 import darpan.agent.claude.ModelGateway
+import darpan.agent.config.AgentConfig
+import darpan.agent.config.AgentConfigDefaults
 import darpan.agent.config.AgentLimits
+import darpan.config.DarpanSettings
 import darpan.agent.loop.AgentToolExecutor
 import darpan.agent.loop.AgentUsageLedger
 import darpan.agent.loop.RoleSpec
@@ -54,6 +57,7 @@ class AgentEvalRunner {
     static final String CONFIRM_PROPERTY = "darpan.agent.evalConfirm"
     static final String DIR_PROPERTY = "darpan.agent.evalDir"
     static final String REPORT_DIR_PROPERTY = "darpan.agent.evalReportDir"
+    static final String AUTHOR_MODEL_PROPERTY = "darpan.agent.authorModel"
     static final String BUDGET_PROPERTY = "darpan.agent.evalBudgetUsd"
     static final String CASES_PROPERTY = "darpan.agent.evalCases"
     static final BigDecimal DEFAULT_BUDGET_USD = new BigDecimal("25")
@@ -211,6 +215,34 @@ class AgentEvalRunner {
         System.setProperty(AgentSwitch.ENABLED_PROPERTY, "true")
         System.setProperty(AgentLimits.TURNS_PER_USER_PER_HOUR, "1000")
         System.setProperty(AgentLimits.DAILY_USD_CAP_PER_TENANT, budgetUsd.toPlainString())
+    }
+
+    /**
+     * Runs body with no settings row for the budget and rate-limit keys, so the -D values configureAgent set are what the
+     * run reads (a row beats the property, and a local one would lift the paid run's spend guard). The loader is put back after.
+     */
+    static <T> T withoutCapRows(Closure<T> body) {
+        Closure<Map<String, Map>> original = DarpanSettings.rowLoader
+        DarpanSettings.rowLoader = { ->
+            Map<String, Map> rows = new LinkedHashMap<>(original.call() ?: [:])
+            rows.remove(AgentLimits.TURNS_PER_USER_PER_HOUR)
+            rows.remove(AgentLimits.DAILY_USD_CAP_PER_TENANT)
+            return rows
+        }
+        DarpanSettings.expire()
+        try {
+            return body.call()
+        } finally {
+            DarpanSettings.rowLoader = original
+            DarpanSettings.expire()
+        }
+    }
+
+    /** Runs body on the author model named by -Ddarpan.agent.authorModel as a config override (no row written); unset, as it is. */
+    static <T> T withAuthorModel(Closure<T> body) {
+        String model = System.getProperty(AUTHOR_MODEL_PROPERTY)?.trim()
+        if (!model) return body.call()
+        return AgentConfig.withConfig(AgentConfig.current(null).with(models: [(AgentConfigDefaults.AUTHOR): model]), body)
     }
 
     /** The synthetic tenant, its run and conclusion tree, the audit and the frozen findings with their records. */
@@ -678,7 +710,7 @@ class AgentEvalRunner {
         List<Map> priced = requests.collect { Map r ->
             long inTokens = ((r.chars as BigDecimal) / CHARS_PER_TOKEN).setScale(0, RoundingMode.CEILING).longValue()
             long outTokens = ((r.maxTokens as BigDecimal) * OUTPUT_SHARE_OF_MAX_TOKENS).setScale(0, RoundingMode.CEILING).longValue()
-            darpan.agent.config.AgentConfig cfg = darpan.agent.config.AgentConfig.current(null)
+            AgentConfig cfg = AgentConfig.current(null)
             darpan.agent.config.ModelPrice p = cfg.price(r.model as String) ?: cfg.dearest()
             long micros = ((p.input * inTokens) + (p.output * outTokens)).setScale(0, RoundingMode.HALF_UP).longValueExact()
             [model: r.model, chars: r.chars, maxTokens: r.maxTokens, inputTokens: inTokens, outputTokens: outTokens, costMicros: micros] as Map
@@ -872,6 +904,15 @@ class AgentEvalRunner {
         configureAgent(budget)
         ExecutionContext ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "agent-eval")
         try {
+            return withoutCapRows { withAuthorModel { runLive(ec, out, evalDir, reportRoot, budget, cases, paid) } }
+        } finally {
+            ReconciliationSmokeTestSupport.cleanupMoqui(ec)
+        }
+    }
+
+    private static int runLive(ExecutionContext ec, PrintStream out, File evalDir, File reportRoot, BigDecimal budget, List<Map> cases, boolean paid) {
+        AgentConfig cfg = AgentConfig.current(ec)
+        try {
             AgentEvalRunner runner = new AgentEvalRunner(ec, evalDir)
             runner.seed()
             Map est = runner.estimate(cases.find { it.id == ESTIMATE_CASE } ?: cases[0], cases.size(), RUNS)
@@ -890,7 +931,7 @@ class AgentEvalRunner {
             }
             ModelGateway gateway = realGateway(ec)
             Map meta = [mode: "LIVE", runs: RUNS, cases: cases*.id, budgetUsd: budget.toPlainString(),
-                        models: [router: RoleSpec.router().model, investigator: RoleSpec.investigator().model, author: RoleSpec.author().model]]
+                        models: [router: cfg.model(AgentConfigDefaults.ROUTER), investigator: cfg.model(AgentConfigDefaults.INVESTIGATOR), author: cfg.model(AgentConfigDefaults.AUTHOR)]]
             Map done = runner.runAndReport(cases, { Map c, int run -> gateway }, { def e, def c, def l -> AgentAvailability.state(e, c, l) }, reportRoot, est, meta, out)
             Map summary = (Map) done.summary
             File dir = (File) done.dir
@@ -898,7 +939,7 @@ class AgentEvalRunner {
             out.println("[agent-eval] report: ${dir}".toString())
             return summary.gate.verdict == "PASS" ? 0 : 2
         } finally {
-            ReconciliationSmokeTestSupport.cleanupMoqui(ec)
+            ec.message.clearAll()
         }
     }
 

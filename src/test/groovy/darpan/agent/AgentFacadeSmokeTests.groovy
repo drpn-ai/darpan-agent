@@ -264,7 +264,7 @@ class AgentFacadeSmokeTests {
         String answer = JsonOutput.toJson([headline: "12 findings are open.", fixes: [[key: "R1|Not exported", text: "Export these orders."]]])
         int asked = 0
         Closure previous = AuditRunWriter.gatewayFor
-        AuditRunWriter.gatewayFor = { def e -> { Object[] args -> asked++; msg("end_turn", [text(answer)], [input_tokens: 500, output_tokens: 40], AuditRunWriter.MODEL) } as darpan.agent.claude.ModelGateway }
+        AuditRunWriter.gatewayFor = { def e -> { Object[] args -> asked++; msg("end_turn", [text(answer)], [input_tokens: 500, output_tokens: 40], "claude-haiku-5-5") } as darpan.agent.claude.ModelGateway }
         try {
             assertTrue(ec.service.isServiceDefined("agent.AgentWriterServices.write#AuditRunWords"))
             assertEquals([headline: "12 findings are open.", fixes: ["R1|Not exported": "Export these orders."]], anonymously { tec ->

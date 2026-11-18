@@ -4,6 +4,9 @@ import com.anthropic.core.ObjectMappers
 import com.anthropic.models.messages.Message
 import com.anthropic.models.messages.MessageCreateParams
 import darpan.agent.claude.ModelGateway
+import darpan.agent.config.AgentConfig
+import darpan.agent.config.AgentConfigTestSupport
+import darpan.agent.config.AgentLimits
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import org.junit.jupiter.api.AfterEach
@@ -33,6 +36,7 @@ class AuditRunWriterTests {
     void restore() {
         AuditRunWriter.enabled = ENABLED
         AuditRunWriter.gatewayFor = GATEWAY
+        AgentConfigTestSupport.clearSettings()
     }
 
     @Test
@@ -85,8 +89,43 @@ class AuditRunWriterTests {
     }
 
     @Test
+    void "the words use the configured model, prompt, timeout and max tokens"() {
+        AuditRunWriter.enabled = { def ec, String t -> true }
+        AgentConfigTestSupport.settings(["darpan.agent.auditRunWordsTimeoutMs": "7000", "darpan.agent.auditRunWordsMaxTokens": "1500"])
+        List<MessageCreateParams> sent = []
+        List<Duration> timeouts = []
+        AuditRunWriter.gatewayFor = { def ec -> new ModelGateway() {
+            Message send(MessageCreateParams params) { sent << params; return message("end_turn", '{"headline": "", "fixes": []}') }
+            Message send(MessageCreateParams params, Duration timeout) { sent << params; timeouts << timeout; return message("end_turn", '{"headline": "", "fixes": []}') }
+        } }
+        AgentConfig cfg = AgentConfig.defaults().with(models: [AUDIT_RUN_WORDS: "claude-sonnet-5-5"], prompts: ["audit-run-words": "CONFIGURED WORDS PROMPT"])
+        AgentConfig.withConfig(cfg) { AuditRunWriter.write(null, "TEST_TENANT", FACTS) }
+        assertEquals([Duration.ofMillis(7000)], timeouts)
+        assertEquals("claude-sonnet-5-5", sent[0].model().asString())
+        assertEquals(1500L, sent[0].maxTokens())
+        assertTrue(sent[0].system().get().toString().contains("CONFIGURED WORDS PROMPT"))
+    }
+
+    @Test
+    void "an unpriced words model sends nothing and gives no words"() {
+        AuditRunWriter.enabled = { def ec, String t -> true }
+        AuditRunWriter.gatewayFor = { def ec -> fail("the model was asked") }
+        AgentConfig cfg = AgentConfig.defaults().with(models: [AUDIT_RUN_WORDS: "claude-unpriced-9"])
+        assertEquals([:], AgentConfig.withConfig(cfg) { AuditRunWriter.write(null, "TEST_TENANT", FACTS) })
+    }
+
+    @Test
+    void "headline and fix caps come from the settings"() {
+        AgentConfigTestSupport.settings(["darpan.agent.auditRunWordsHeadlineMaxChars": "60", "darpan.agent.auditRunWordsFixMaxChars": "50"])
+        Map words = AuditRunWriter.checked(FACTS, [headline: "1,204 " + ("x" * 60),
+                fixes: [[key: "R1|Stuck in approval", text: "y" * 51], [key: "R2|", text: "z" * 50]]])
+        assertNull(words.headline, "over the configured headline cap")
+        assertEquals(["R2|": "z" * 50], words.fixes, "51 chars is over the configured fix cap, 50 is not")
+    }
+
+    @Test
     void "the request is one Haiku call at low effort with the schema and the facts, no thinking config"() {
-        Map wire = (Map) new JsonSlurper().parseText(MAPPER.writeValueAsString(AuditRunWriter.params(FACTS)._body()))
+        Map wire = (Map) new JsonSlurper().parseText(MAPPER.writeValueAsString(AuditRunWriter.params(FACTS, AgentConfig.defaults(), AgentLimits.read())._body()))
         assertEquals("claude-haiku-5-5", wire.model)
         assertEquals("low", wire.output_config.effort)
         assertEquals("json_schema", wire.output_config.format.type)
@@ -112,7 +151,7 @@ class AuditRunWriterTests {
         List<Duration> timeouts = []
         AuditRunWriter.gatewayFor = { def ec -> gateway(timeouts) { message("end_turn", json) } }
         assertEquals([headline: "1,204 findings are open.", fixes: [:]], AuditRunWriter.write(null, "TEST_TENANT", FACTS))
-        assertEquals([AuditRunWriter.TIMEOUT], timeouts)
+        assertEquals([Duration.ofSeconds(60)], timeouts)
 
         AuditRunWriter.gatewayFor = { def ec -> gateway(timeouts) { message("refusal", "") } }
         assertEquals([:], AuditRunWriter.write(null, "TEST_TENANT", FACTS))

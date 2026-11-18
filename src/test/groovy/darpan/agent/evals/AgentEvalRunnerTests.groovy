@@ -5,7 +5,9 @@ import com.anthropic.models.messages.Message
 import darpan.agent.AgentOrchestrator
 import darpan.agent.AgentRedaction
 import darpan.agent.AgentSwitch
+import darpan.agent.config.AgentConfig
 import darpan.agent.config.AgentLimits
+import darpan.config.DarpanSettings
 import darpan.agent.loop.AgentRoleLoopTests
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
@@ -384,6 +386,45 @@ class AgentEvalRunnerTests {
         Map fixed = AgentEvalRunner.estimateFrom([[model: "claude-haiku-5-5", chars: 3500, maxTokens: 2000L]], "x", 1, 1)
         assertEquals([1000L, 500L, 350L], [fixed.requests[0].inputTokens, fixed.requests[0].outputTokens, fixed.totalMicros])
         assertEquals("\$0.0004", fixed.totalUsd)
+    }
+
+    @Test
+    void "a local settings row cannot lift the eval's budget"() {
+        Closure rows = { -> [(AgentLimits.DAILY_USD_CAP_PER_TENANT): [settingValue: "1000"], (AgentLimits.TURNS_PER_USER_PER_HOUR): [settingValue: "1"],
+                             (AgentLimits.TURN_WALL_CLOCK_MS): [settingValue: "90000"]] as Map<String, Map> }
+        try {
+            AgentEvalRunner.configureAgent(2G)
+            DarpanSettings.rowLoader = rows
+            DarpanSettings.expire()
+            assertEquals(0, new BigDecimal(1000).compareTo(DarpanSettings.decimalValue(AgentLimits.DAILY_USD_CAP_PER_TENANT)), "without the guard the row wins")
+            List seen = AgentEvalRunner.withoutCapRows {
+                [DarpanSettings.decimalValue(AgentLimits.DAILY_USD_CAP_PER_TENANT), DarpanSettings.intValue(AgentLimits.TURNS_PER_USER_PER_HOUR),
+                 DarpanSettings.intValue(AgentLimits.TURN_WALL_CLOCK_MS)]
+            }
+            assertEquals([0, 0, 0], [new BigDecimal(2).compareTo(seen[0]), new BigDecimal(1000).compareTo(new BigDecimal(seen[1])), new BigDecimal(90000).compareTo(new BigDecimal(seen[2]))], "the -D budget and rate hold; another key's row still applies")
+            assertSame(rows, DarpanSettings.rowLoader, "the loader is put back")
+            assertEquals(0, new BigDecimal(1000).compareTo(DarpanSettings.decimalValue(AgentLimits.DAILY_USD_CAP_PER_TENANT)), "and the row is back afterwards")
+        } finally {
+            DarpanSettings.resetForTest()
+            AgentEvalRunner.configureAgent(AgentEvalRunner.DEFAULT_BUDGET_USD)
+        }
+    }
+
+    @Test
+    void "the author model override is a config override, not a row"() {
+        String before = System.getProperty(AgentEvalRunner.AUTHOR_MODEL_PROPERTY)
+        try {
+            System.clearProperty(AgentEvalRunner.AUTHOR_MODEL_PROPERTY)
+            assertEquals("claude-sonnet-5-5", AgentEvalRunner.withAuthorModel { AgentConfig.current(ec).model("AUTHOR") })
+            System.setProperty(AgentEvalRunner.AUTHOR_MODEL_PROPERTY, "claude-haiku-5-5")
+            assertEquals(["claude-haiku-5-5", "claude-sonnet-5-5"], AgentEvalRunner.withAuthorModel { [AgentConfig.current(ec).model("AUTHOR"), AgentConfig.current(ec).model("ROUTER")] })
+            assertEquals("claude-sonnet-5-5", AgentConfig.current(ec).model("AUTHOR"), "outside the run the config is untouched")
+            boolean was = ec.artifactExecution.disableAuthz()
+            try { assertNull(ec.entity.find("darpan.agent.AgentRoleConfig").condition("roleId", "AUTHOR").one(), "no row written") }
+            finally { if (!was) ec.artifactExecution.enableAuthz() }
+        } finally {
+            before == null ? System.clearProperty(AgentEvalRunner.AUTHOR_MODEL_PROPERTY) : System.setProperty(AgentEvalRunner.AUTHOR_MODEL_PROPERTY, before)
+        }
     }
 
     @Test

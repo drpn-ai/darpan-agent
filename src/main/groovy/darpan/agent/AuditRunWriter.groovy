@@ -10,6 +10,8 @@ import com.anthropic.models.messages.TextBlockParam
 import darpan.agent.claude.AnthropicModelGateway
 import darpan.agent.claude.ModelGateway
 import darpan.agent.config.AgentConfig
+import darpan.agent.config.AgentConfigDefaults
+import darpan.agent.config.AgentLimits
 import darpan.agent.loop.AgentRoleLoop
 import darpan.agent.loop.AgentUsageLedger
 import darpan.facade.common.TenantScopedFinder
@@ -28,20 +30,13 @@ import java.time.Duration
  *
  * Runs only where the agent is on for the tenant (the deployment switch and TenantSetting.agentEnabled = Y): the fact
  * sheet carries the tenant's order ids and cause text to Anthropic. The tenant is the one named by the caller, not the
- * session's, because the update is sent after an automation run, where no one is signed in. Never throws: no words is
- * an answer.
+ * session's, because the update is sent after an automation run, where no one is signed in. The model and prompt are the
+ * agent config's, the timeout, token and length caps the settings (read once per call); a model with no price sends nothing.
+ * Never throws: no words is an answer.
  */
 class AuditRunWriter {
     private static final Logger logger = LoggerFactory.getLogger(AuditRunWriter.class)
 
-    static final String MODEL = "claude-haiku-5-5"
-    static final String PROMPT = "darpan/agent/prompts/audit-run-words.md"
-    /** Room for adaptive thinking at low effort plus the JSON (about 1-2k tokens for a large audit). */
-    static final long MAX_TOKENS = 8_000L
-    /** One attempt; a run update waits for nothing else, so a slow model only delays the email. */
-    static final Duration TIMEOUT = Duration.ofSeconds(60)
-    static final int HEADLINE_MAX_CHARS = 400
-    static final int FIX_MAX_CHARS = 300
     private static final String WHY = "audit run words: agent switch of the tenant named by the run update"
 
     /** Structured output. fixes is a list, not a map: structured outputs allow no free-form keys. */
@@ -63,20 +58,25 @@ class AuditRunWriter {
     static Closure<Boolean> enabled = { def ec, String tenantId -> enabledFor(ec, tenantId) }
 
     /** {headline, fixes {"R2|cause": sentence}}; empty when the agent is off for the tenant or no usable words came back. */
-    static Map write(def ec, String tenantId, Map facts) {
+    static Map write(def ec, String tenantId, Map facts, AgentConfig cfg = AgentConfig.current(ec), AgentLimits lim = AgentLimits.read()) {
         if (!tenantId || !(facts?.groups instanceof List)) return [:]
         try {
             if (!enabled.call(ec, tenantId)) return [:]
-            Message message = gatewayFor.call(ec).send(params(facts), TIMEOUT)
+            String model = cfg.model(AgentConfigDefaults.AUDIT_RUN_WORDS)
+            if (cfg.price(model) == null) {
+                logger.warn("Audit run words for {}: the model '{}' has no price; sent without words", tenantId, model)
+                return [:]
+            }
+            Message message = gatewayFor.call(ec).send(params(facts, cfg, lim), Duration.ofMillis(lim.auditRunWordsTimeoutMs))
             logger.info("Audit run words for {}: {} in, {} out, {} micro-USD", tenantId, message.usage().inputTokens(),
-                    message.usage().outputTokens(), AgentUsageLedger.costMicros(MODEL, message.usage()))
+                    message.usage().outputTokens(), AgentUsageLedger.costMicros(model, message.usage(), cfg))
             StopReason stop = message.stopReason().orElse(null)
             if (stop != StopReason.END_TURN) {
                 logger.warn("Audit run words for {}: the model stopped with {}; sent without words", tenantId, stop)
                 return [:]
             }
             String text = message.content().find { it.isText() }?.asText()?.text()
-            return checked(facts, text ? new JsonSlurper().parseText(text) : null)
+            return checked(facts, text ? new JsonSlurper().parseText(text) : null, lim)
         } catch (Exception e) {
             // The class only: a message could carry request detail.
             logger.warn("Audit run words for {} failed ({}); sent without words", tenantId, e.class.simpleName)
@@ -94,12 +94,12 @@ class AuditRunWriter {
     }
 
     /** One request: the prompt (cached), the fact sheet, low effort, the schema. Thinking left to the model's default. */
-    static MessageCreateParams params(Map facts) {
+    static MessageCreateParams params(Map facts, AgentConfig cfg, AgentLimits lim) {
         Map output = [effort: "low", format: [type: "json_schema", schema: SCHEMA]]
         return MessageCreateParams.builder()
-                .model(MODEL)
-                .maxTokens(MAX_TOKENS)
-                .systemOfTextBlockParams([TextBlockParam.builder().text(AgentConfig.current(null).promptForPath(PROMPT))
+                .model(cfg.model(AgentConfigDefaults.AUDIT_RUN_WORDS))
+                .maxTokens((long) lim.auditRunWordsMaxTokens)
+                .systemOfTextBlockParams([TextBlockParam.builder().text(cfg.prompt("audit-run-words"))
                         .cacheControl(CacheControlEphemeral.builder().build()).build()])
                 .addUserMessage("<facts>\n" + JsonOutput.toJson(facts) + "\n</facts>")
                 .outputConfig(ObjectMappers.jsonMapper().convertValue(output, OutputConfig))
@@ -111,14 +111,14 @@ class AuditRunWriter {
      * a number the facts do not have (other than the count of rules with open findings). A fix goes when its key is not a
      * group's, it is blank or too long, holds a {placeholder}, or repeats one of its group's ids. Pure.
      */
-    static Map checked(Map facts, Object answer) {
+    static Map checked(Map facts, Object answer, AgentLimits lim = AgentLimits.read()) {
         if (!(answer instanceof Map)) return [:]
         Map out = [headline: null, fixes: [:]]
 
         Set<String> numbers = numbersIn(JsonOutput.toJson(facts))
         numbers << String.valueOf(((facts.rules ?: []) as List<Map>).count { ((it.open ?: 0) as int) > 0 })
         String headline = oneLine(answer.headline)
-        if (headline && headline.length() <= HEADLINE_MAX_CHARS && !headline.contains("{") && numbers.containsAll(numbersIn(headline, true))) {
+        if (headline && headline.length() <= lim.auditRunWordsHeadlineMaxChars && !headline.contains("{") && numbers.containsAll(numbersIn(headline, true))) {
             out.headline = headline
         }
 
@@ -129,7 +129,7 @@ class AuditRunWriter {
             Map group = groups[key]
             String text = oneLine(entry.text)
             if (group == null || !text || out.fixes.containsKey(key)) return
-            if (text.length() > FIX_MAX_CHARS || text.contains("{") || text.contains("}")) return
+            if (text.length() > lim.auditRunWordsFixMaxChars || text.contains("{") || text.contains("}")) return
             if (((group.ids ?: []) as List).any { it && text.contains(it as String) }) return
             out.fixes[key] = text
         }

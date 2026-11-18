@@ -4,6 +4,9 @@ import com.anthropic.core.ObjectMappers
 import com.anthropic.models.messages.Message
 import com.anthropic.models.messages.MessageCreateParams
 import darpan.agent.claude.ModelGateway
+import darpan.agent.config.AgentConfig
+import darpan.agent.config.AgentConfigTestSupport
+import darpan.agent.config.ModelPrice
 import groovy.json.JsonOutput
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -22,6 +25,7 @@ class EmailSmileWriterTests {
     void restore() {
         EmailSmileWriter.enabled = ENABLED
         EmailSmileWriter.gatewayFor = GATEWAY
+        AgentConfigTestSupport.clearSettings()
     }
 
     @Test
@@ -31,19 +35,49 @@ class EmailSmileWriterTests {
         List<Duration> timeouts = []
         EmailSmileWriter.gatewayFor = { def ec -> gateway(sent, timeouts) { message("end_turn", '{"line": "  Spare keys:   the unsung heroes. "}') } }
         assertEquals("Spare keys: the unsung heroes.", EmailSmileWriter.write(null, "DARPAN_2FA_RECOVERY_USED", "Phone in the other bag? Happens."))
-        assertEquals([EmailSmileWriter.TIMEOUT], timeouts)
+        assertEquals([Duration.ofMillis(4000)], timeouts)
         String user = sent[0].messages()[0].content().toString()
-        assertTrue(user.contains(EmailSmileWriter.BRIEFS.DARPAN_2FA_RECOVERY_USED), user)
+        assertTrue(user.contains(EmailSmileWriter.brief(null, "DARPAN_2FA_RECOVERY_USED")), user)
         assertTrue(user.contains("<example>Phone in the other bag? Happens.</example>"), user)
-        assertEquals(EmailSmileWriter.MODEL, sent[0].model().asString())
+        assertEquals("claude-haiku-5-5", sent[0].model().asString())
+    }
+
+    @Test
+    void "the line uses the configured model, prompt, timeout and max tokens"() {
+        EmailSmileWriter.enabled = { def ec -> true }
+        AgentConfigTestSupport.settings(["darpan.agent.emailSmileTimeoutMs": "2500", "darpan.agent.emailSmileMaxTokens": "321"])
+        List<MessageCreateParams> sent = []
+        List<Duration> timeouts = []
+        EmailSmileWriter.gatewayFor = { def ec -> gateway(sent, timeouts) { message("end_turn", '{"line": "Spare keys."}') } }
+        AgentConfig cfg = AgentConfig.defaults().with(models: [EMAIL_SMILE: "claude-sonnet-5-5"], prompts: ["email-smile": "CONFIGURED SMILE PROMPT"])
+        assertEquals("Spare keys.", AgentConfig.withConfig(cfg) { EmailSmileWriter.write(null, "DARPAN_2FA_RESET", "Clean slate.") })
+        assertEquals([Duration.ofMillis(2500)], timeouts)
+        assertEquals("claude-sonnet-5-5", sent[0].model().asString())
+        assertEquals(321L, sent[0].maxTokens())
+        assertTrue(sent[0].system().get().toString().contains("CONFIGURED SMILE PROMPT"), sent[0].system().toString())
+    }
+
+    @Test
+    void "an unpriced smile model sends nothing and gives no line"() {
+        EmailSmileWriter.enabled = { def ec -> true }
+        EmailSmileWriter.gatewayFor = { def ec -> fail("the model was asked") }
+        AgentConfig cfg = AgentConfig.defaults().with(models: [EMAIL_SMILE: "claude-unpriced-9"])
+        assertNull(AgentConfig.withConfig(cfg) { EmailSmileWriter.write(null, "DARPAN_2FA_RESET", "Clean slate.") })
+    }
+
+    @Test
+    void "the brief comes through brief(ec, key)"() {
+        assertTrue(EmailSmileWriter.brief(null, "DARPAN_TENANT_WELCOME").contains("welcome email"))
+        assertNull(EmailSmileWriter.brief(null, "DARPAN_2FA_CODES_LOCKED"))
+        assertNull(EmailSmileWriter.brief(null, null))
     }
 
     @Test
     void "every email core asks about has a brief"() {
         ["DARPAN_PASSWORD_RESET_CODE", "DARPAN_PASSWORD_CHANGED", "DARPAN_2FA_PASSKEY_ADDED", "DARPAN_2FA_APP_ADDED",
          "DARPAN_2FA_RECOVERY_USED", "DARPAN_2FA_RESET", "DARPAN_RECOVERY_EMAIL_SET_OLD", "DARPAN_RECOVERY_EMAIL_SET_NEW",
-         "DARPAN_TENANT_WELCOME"].each { assertTrue(EmailSmileWriter.BRIEFS[it]?.length() > 40, it) }
-        assertFalse(EmailSmileWriter.BRIEFS.containsKey("DARPAN_2FA_CODES_LOCKED"), "the alarm email has no playful line")
+         "DARPAN_TENANT_WELCOME"].each { assertTrue(EmailSmileWriter.brief(null, it)?.length() > 40, it) }
+        assertNull(EmailSmileWriter.brief(null, "DARPAN_2FA_CODES_LOCKED"), "the alarm email has no playful line")
     }
 
     @Test

@@ -82,6 +82,18 @@ class AnthropicModelGatewayTests {
     }
 
     @Test
+    void "connect and read-idle timeouts come from the settings"() {
+        try {
+            darpan.agent.config.AgentConfigTestSupport.settings(["darpan.agent.gatewayConnectTimeoutMs": "3000", "darpan.agent.gatewayReadIdleTimeoutMs": "45000"])
+            def t = AnthropicModelGateway.attemptTimeout(java.time.Duration.ofSeconds(9))
+            assertEquals(java.time.Duration.ofMillis(3000), t.connect())
+            assertEquals(java.time.Duration.ofMillis(45000), t.read())
+        } finally {
+            darpan.agent.config.AgentConfigTestSupport.clearSettings()
+        }
+    }
+
+    @Test
     void "the client is looked up on every request and a missing one is unavailable"() {
         int lookups = 0
         def gateway = AnthropicModelGateway.supplying { lookups++; null }

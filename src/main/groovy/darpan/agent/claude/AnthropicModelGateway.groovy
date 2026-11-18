@@ -10,6 +10,8 @@ import com.anthropic.models.messages.MessageCreateParams
 import com.anthropic.models.messages.MessageDeltaUsage
 import com.anthropic.models.messages.RawMessageStreamEvent
 import com.anthropic.models.messages.Usage
+import darpan.agent.config.AgentLimits
+import darpan.config.DarpanSettings
 
 import java.time.Duration
 
@@ -18,14 +20,6 @@ import java.time.Duration
  * looked up for every request: a key rotation closes the old client, so none is held across requests or turns.
  */
 class AnthropicModelGateway implements ModelGateway {
-    /** Connecting may take this long. */
-    static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10)
-    /**
-     * The longest silence between bytes of a response (OkHttp's read timeout is per socket read, so an idle timeout, not a
-     * whole-body one). A live stream sends events or pings well inside it, so a long answer keeps its whole time.
-     */
-    static final Duration READ_IDLE_TIMEOUT = Duration.ofSeconds(30)
-
     private final Closure<AnthropicClient> clientSupplier
 
     AnthropicModelGateway(AnthropicClient client) {
@@ -69,9 +63,16 @@ class AnthropicModelGateway implements ModelGateway {
         return accumulate(client.messages().createStreaming(params, RequestOptions.builder().timeout(attemptTimeout(timeout)).build()))
     }
 
-    /** connect 10 s, read 30 s idle, the whole call at most request. */
+    /**
+     * Connect and read-idle limits from the settings (transport settings, read per request, not part of a turn's snapshot); the
+     * read limit is an idle timeout, not a whole-body one (OkHttp's read timeout is per socket read, so a live stream that sends
+     * events or pings keeps its whole time); the whole call at most request.
+     */
     static Timeout attemptTimeout(Duration request) {
-        return Timeout.builder().connect(CONNECT_TIMEOUT).read(READ_IDLE_TIMEOUT).request(request).build()
+        return Timeout.builder()
+                .connect(Duration.ofMillis(DarpanSettings.intValue(AgentLimits.GATEWAY_CONNECT_TIMEOUT_MS)))
+                .read(Duration.ofMillis(DarpanSettings.intValue(AgentLimits.GATEWAY_READ_IDLE_TIMEOUT_MS)))
+                .request(request).build()
     }
 
     /**

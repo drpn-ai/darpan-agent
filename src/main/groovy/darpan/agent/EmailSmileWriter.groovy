@@ -10,6 +10,8 @@ import com.anthropic.models.messages.TextBlockParam
 import darpan.agent.claude.AnthropicModelGateway
 import darpan.agent.claude.ModelGateway
 import darpan.agent.config.AgentConfig
+import darpan.agent.config.AgentConfigDefaults
+import darpan.agent.config.AgentLimits
 import darpan.agent.loop.AgentRoleLoop
 import darpan.agent.loop.AgentUsageLedger
 import groovy.json.JsonSlurper
@@ -25,16 +27,11 @@ import java.time.Duration
  *
  * What goes to the model: the prompt, the key's brief (below) and the template's own line. Nothing about the reader or a
  * tenant, so the switch is the deployment's alone (darpan.agent.enabled / DARPAN_AGENT_ENABLED), not a tenant's
- * agentEnabled. A key with no brief gets nothing. Never throws: no line is an answer.
+ * agentEnabled. A key with no brief gets nothing. The model, prompt, timeout and token cap are the agent config's and settings
+ * (read once per call); a model with no price sends nothing. Never throws: no line is an answer.
  */
 class EmailSmileWriter {
     private static final Logger logger = LoggerFactory.getLogger(EmailSmileWriter.class)
-
-    static final String MODEL = "claude-haiku-5-5"
-    static final String PROMPT = "darpan/agent/prompts/email-smile.md"
-    static final long MAX_TOKENS = 200L
-    /** The reset code is sent while the reader waits on the sign-in page: a slow model must not hold it up. */
-    static final Duration TIMEOUT = Duration.ofSeconds(4)
 
     static final Map SCHEMA = [type: "object", properties: [line: [type: "string"]], required: ["line"],
                                additionalProperties: false].asImmutable()
@@ -57,15 +54,25 @@ class EmailSmileWriter {
     /** Tests replace it; production reads the deployment switch. */
     static Closure<Boolean> enabled = { def ec -> deploymentOn() }
 
-    /** The line, or null when the agent is off, the key has no brief, or nothing usable came back. */
-    static String write(def ec, String key, String fallback) {
-        String brief = key ? BRIEFS[key] : null
+    /** The key's brief, or null when it has none. The one seam for it: DAR-BE-303 moves it to the email's copy row. */
+    static String brief(def ec, String key) {
+        return key ? BRIEFS[key] : null
+    }
+
+    /** The line, or null when the agent is off, the key has no brief, the model is unpriced, or nothing usable came back. */
+    static String write(def ec, String key, String fallback, AgentConfig cfg = AgentConfig.current(ec), AgentLimits lim = AgentLimits.read()) {
+        String brief = brief(ec, key)
         if (!brief) return null
         try {
             if (!enabled.call(ec)) return null
-            Message message = gatewayFor.call(ec).send(params(brief, fallback), TIMEOUT)
+            String model = cfg.model(AgentConfigDefaults.EMAIL_SMILE)
+            if (cfg.price(model) == null) {
+                logger.warn("Email smile {}: the model '{}' has no price; the template's line goes", key, model)
+                return null
+            }
+            Message message = gatewayFor.call(ec).send(params(brief, fallback, cfg, lim), Duration.ofMillis(lim.emailSmileTimeoutMs))
             logger.info("Email smile {}: {} in, {} out, {} micro-USD", key, message.usage().inputTokens(),
-                    message.usage().outputTokens(), AgentUsageLedger.costMicros(MODEL, message.usage()))
+                    message.usage().outputTokens(), AgentUsageLedger.costMicros(model, message.usage(), cfg))
             if (message.stopReason().orElse(null) != StopReason.END_TURN) return null
             String text = message.content().find { it.isText() }?.asText()?.text()
             Object answer = text ? new JsonSlurper().parseText(text) : null
@@ -84,12 +91,12 @@ class EmailSmileWriter {
     }
 
     /** One request: the prompt (cached), the brief and the template's line, the schema. No thinking: one short line. */
-    static MessageCreateParams params(String brief, String fallback) {
+    static MessageCreateParams params(String brief, String fallback, AgentConfig cfg, AgentLimits lim) {
         Map output = [format: [type: "json_schema", schema: SCHEMA]]
         return MessageCreateParams.builder()
-                .model(MODEL)
-                .maxTokens(MAX_TOKENS)
-                .systemOfTextBlockParams([TextBlockParam.builder().text(AgentConfig.current(null).promptForPath(PROMPT))
+                .model(cfg.model(AgentConfigDefaults.EMAIL_SMILE))
+                .maxTokens((long) lim.emailSmileMaxTokens)
+                .systemOfTextBlockParams([TextBlockParam.builder().text(cfg.prompt("email-smile"))
                         .cacheControl(CacheControlEphemeral.builder().build()).build()])
                 .addUserMessage("<brief>${brief}</brief>\n<example>${fallback ?: ''}</example>".toString())
                 .outputConfig(ObjectMappers.jsonMapper().convertValue(output, OutputConfig))
