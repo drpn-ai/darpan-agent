@@ -95,7 +95,7 @@ class AgentEvalRunner {
     private static final def MAPPER = ObjectMappers.jsonMapper()
 
     /** Switch on and a client "there": the gateway is a fake, so no key is needed or read. */
-    static final Closure<String> OFFLINE_AVAILABLE = { def e -> AgentAvailability.resolve(AgentSwitch.state(e)) { new Object() } }
+    static final Closure<String> OFFLINE_AVAILABLE = { def e, def c, def l -> AgentAvailability.resolve(AgentSwitch.state(e)) { new Object() } }
 
     final ExecutionContext ec
     final File evalDir
@@ -891,7 +891,7 @@ class AgentEvalRunner {
             ModelGateway gateway = realGateway(ec)
             Map meta = [mode: "LIVE", runs: RUNS, cases: cases*.id, budgetUsd: budget.toPlainString(),
                         models: [router: RoleSpec.router().model, investigator: RoleSpec.investigator().model, author: RoleSpec.author().model]]
-            Map done = runner.runAndReport(cases, { Map c, int run -> gateway }, { def e -> AgentAvailability.state(e) }, reportRoot, est, meta, out)
+            Map done = runner.runAndReport(cases, { Map c, int run -> gateway }, { def e, def c, def l -> AgentAvailability.state(e, c, l) }, reportRoot, est, meta, out)
             Map summary = (Map) done.summary
             File dir = (File) done.dir
             out.println("[agent-eval] gate ${summary.gate.verdict}: injection ${summary.injection.passedCases}/${summary.injection.cases}, router ${summary.router.percent}, overall ${summary.overall.percent}; cost ${summary.cost.totalUsd}".toString())

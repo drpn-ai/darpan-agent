@@ -33,13 +33,15 @@ import java.util.regex.Pattern
  *            the turnsPerUserPerHour setting per person; the tenant's daily dollar cap
  *   pin      the active tenant, once; every row this turn writes carries it, whatever another tab does
  *   scrub    keys, secrets, emails and phones out of the text (PasteScrubber) before it is stored or sent
- *   ROUTER   Sonnet, no thinking, no tools, never record data: items[] {kind, span, refs, confidence}, or one question
+ *   ROUTER   no thinking, no tools, never record data: items[] {kind, span, refs, confidence}, or one question
  *   OTHER    a fixed decline; no other model call
- *   INVESTIGATOR  Sonnet, read tools: typed Evidence (each value tagged HUMAN, CONFIG or TOOL) plus an answer for EXPLAIN
- *   AUTHOR   Opus: propose_* (one tool per proposal kind) / raise_ticket / ask_human / request_more_evidence (at most 2 rounds). It reads the verbatim
+ *   INVESTIGATOR  read tools: typed Evidence (each value tagged HUMAN, CONFIG or TOOL) plus an answer for EXPLAIN
+ *   AUTHOR   propose_* (one tool per proposal kind) / raise_ticket / ask_human / request_more_evidence (at most 2 rounds). It reads the verbatim
  *            words, the turn's items, the Evidence (validated, typed, pruned: never the investigator's raw tool text or its
  *            prose answer) and the brain catalog in its cached prefix. DISPLAY_FEEDBACK and PRODUCT_BUG go to it with
  *            raise_ticket only.
+ *
+ * Every role's model, prompt and price is data (AgentConfig), and its budgets are settings (AgentLimits); both are read once at the start of the turn.
  *
  * The whole turn is capped at the turnWallClockMs setting: each role's wall clock is the smaller of its own and what is left, and a role that
  * would start with less than {@link #MIN_ROLE_MS} left does not start (outcome INCOMPLETE).
@@ -78,7 +80,7 @@ class AgentOrchestrator {
     private static final ThreadLocal<Map> THREAD_OVERRIDE = new ThreadLocal<>()
 
     final ModelGateway gateway
-    /** ec -> ON, AGENT_OFF or AGENT_UNAVAILABLE. */
+    /** (ec, the turn's AgentConfig, the turn's AgentLimits) -> ON, AGENT_OFF, AGENT_UNAVAILABLE or AGENT_REFUSED. */
     final Closure<String> availability
     /** Milliseconds now; tests move it. */
     Closure<Long> clock = { System.currentTimeMillis() }
@@ -92,7 +94,7 @@ class AgentOrchestrator {
     static AgentOrchestrator forRequest(def ec) {
         Map o = THREAD_OVERRIDE.get()
         if (o != null) return new AgentOrchestrator((ModelGateway) o.gateway, (Closure<String>) o.availability)
-        return new AgentOrchestrator(AnthropicModelGateway.perRequest(ec), { e -> AgentAvailability.state(e) })
+        return new AgentOrchestrator(AnthropicModelGateway.perRequest(ec), { e, c, l -> AgentAvailability.state(e, c, l) })
     }
 
     /** Runs body with this thread's send#AgentTurn using gateway and availability (tests only; restored after). */
@@ -119,12 +121,12 @@ class AgentOrchestrator {
      * text). DAR-BE-292: only an editor or tenant admin talks to the agent, so every draft it makes can be planned at once.
      */
     Map send(def ec, String conversationId, String auditId, String findingId, String text, String auditCode = null) {
-        String state = availability.call(ec)
-        if (state != AgentSwitch.ON) return response(conversationId, state ?: AgentSwitch.AGENT_OFF, unavailableReply(state))
-        // DAR-BE-307: one config and one limits snapshot for the whole turn, taken here and never inside a lock; every role and
-        // check below reads from these two, so an edit made mid-turn waits for the next turn.
+        // DAR-BE-307: one config and one limits snapshot for the whole turn, taken first and never inside a lock; every check
+        // and role below (availability included) reads from these two, so an edit made mid-turn waits for the next turn.
         AgentConfig cfg = AgentConfig.current(ec)
         AgentLimits lim = AgentLimits.read()
+        String state = availability.call(ec, cfg, lim)
+        if (state != AgentSwitch.ON) return response(conversationId, state ?: AgentSwitch.AGENT_OFF, unavailableReply(state))
         // A role whose model has no price never sends: its spend could not be counted. Checked on this turn's own snapshot.
         if (AgentAvailability.pricingRefusal(cfg)) return response(conversationId, AgentAvailability.AGENT_REFUSED, unavailableReply(AgentAvailability.AGENT_REFUSED))
 
@@ -222,7 +224,7 @@ class AgentOrchestrator {
         String pinned = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         String userId = ec.user.userId as String
         if (!pinned || !userId) { ec.message.addError("No active tenant."); return null }
-        return [state: availability.call(ec) ?: AgentSwitch.AGENT_OFF, grantState: AgentAccess.access(ec, pinned, userId).state,
+        return [state: availability.call(ec, AgentConfig.current(ec), AgentLimits.read()) ?: AgentSwitch.AGENT_OFF, grantState: AgentAccess.access(ec, pinned, userId).state,
                 canApprove: TenantAccessSupport.canEditActiveTenantData(ec)]
     }
 
@@ -546,7 +548,7 @@ class AgentOrchestrator {
         if (access.state != AgentAccess.LIVE) throw new Stop(accessOutcome(access), accessReply(access))
         turn.grantId = access.grantId as String
         // The switch is read again before every role: turned off mid-turn, the next role does not start.
-        String state = availability.call(turn.ec)
+        String state = availability.call(turn.ec, turn.cfg, turn.limits)
         if (state != AgentSwitch.ON) throw new Stop(state ?: AgentSwitch.AGENT_OFF, state == AgentSwitch.AGENT_UNAVAILABLE ?
                 "The agent cannot reach Claude right now; try again later." : "The agent was switched off for this tenant.")
         RoleSpec spec = left < base.wallClockMs ? base.copy(wallClockMs: left) : base

@@ -62,7 +62,7 @@ class AgentUsageLedger {
     /** Pauses a grant that reached its limit (AgentAccess.pauseIfOverLimit); tests replace it to make the pause fail. */
     static Closure<Boolean> pauser = { def e, String grantId -> darpan.agent.AgentAccess.pauseIfOverLimit(e, grantId) }
 
-    static long record(def ec, String pinnedTenantId, String turnId, Usage usage, String model, AgentConfig cfg = AgentConfig.current(ec)) {
+    static long record(def ec, String pinnedTenantId, String turnId, Usage usage, String model, AgentConfig cfg) {
         long cost = costMicros(model, usage, cfg)
         String grantId = null
         ec.transaction.runRequireNew(null, "Could not record agent usage") {

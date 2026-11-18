@@ -95,11 +95,23 @@ class AgentConfigTests {
     }
 
     @Test
-    @DisplayName("unpricedRoles lists a role whose model has no price and skips none")
+    @DisplayName("unpricedRoles lists a role whose model has no price and skips an escalation set to none")
     void unpricedRoles() {
-        AgentConfigTestSupport.set(ec, [AgentRoleConfig: [[roleId: "ROUTER", modelId: "claude-unpriced-1"], [roleId: "INVESTIGATOR", modelId: "none"]]])
+        AgentConfigTestSupport.set(ec, [AgentRoleConfig: [[roleId: "ROUTER", modelId: "claude-unpriced-1"], [roleId: "AUTHOR_ESCALATION", modelId: "none"]]])
         AgentConfig c = AgentConfig.current(ec)
         assertEquals(["ROUTER"], c.unpricedRoles(AgentConfigDefaults.TURN_ROLES))
+    }
+
+    @Test
+    @DisplayName("none is accepted only for the escalation author; a raw none on another role keeps its default")
+    void noneOnlyForEscalation() {
+        AgentConfigTestSupport.set(ec, [AgentRoleConfig: [[roleId: "ROUTER", modelId: "none"], [roleId: "INVESTIGATOR", modelId: "none"],
+                                                         [roleId: "AUTHOR", modelId: "none"], [roleId: "AUTHOR_ESCALATION", modelId: "none"]]])
+        AgentConfig c = AgentConfig.current(ec)
+        assertEquals("claude-sonnet-5-5", c.model("ROUTER"))
+        assertEquals("claude-sonnet-5-5", c.model("INVESTIGATOR"))
+        assertEquals("claude-sonnet-5-5", c.model("AUTHOR"))
+        assertEquals("none", c.model("AUTHOR_ESCALATION"))
     }
 
     @Test

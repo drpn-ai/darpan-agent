@@ -42,6 +42,13 @@ class AgentPreflightTests {
     }
 
     @Test
+    void "a refused escalation shape is named AUTHOR_ESCALATION"() {
+        def refused = new AgentRoleLoopTests.ScriptedGateway([ok, ok, ok, ok, AgentRoleLoopTests.errors.status(404)])
+        String why = AgentPreflight.refusal(refused, AgentConfig.defaults())
+        assertTrue(why?.startsWith("AUTHOR_ESCALATION claude-opus-5-5"), why)
+    }
+
+    @Test
     void "preflight asks again when a turn role's model changes"() {
         def accepted = new AgentRoleLoopTests.ScriptedGateway([ok, ok, ok, ok, ok])
         assertNull(AgentPreflight.refusal(accepted, AgentConfig.defaults()))

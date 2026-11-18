@@ -601,7 +601,7 @@ class AgentRoleLoopTests {
         try {
             String turnId = AgentUsageLedger.startTurn(ec, MINE, CONV, "INVESTIGATOR", "claude-sonnet-5-5", USER, grantId)
             Usage u = MAPPER.readValue('{"input_tokens":100,"output_tokens":20}', Usage)
-            assertEquals(400L, AgentUsageLedger.record(ec, MINE, turnId, u, "claude-sonnet-5-5"))
+            assertEquals(400L, AgentUsageLedger.record(ec, MINE, turnId, u, "claude-sonnet-5-5", AgentConfig.defaults()))
             assertEquals(400L, turnRow(turnId).costMicros as long, "the cost stays on the ledger, so the caps still count it")
             assertFalse(ec.message.hasError(), "a failed pause leaves no error behind for the turn: ${ec.message.errorsString}")
             assertEquals(darpan.agent.AgentAccess.PAUSED, darpan.agent.AgentAccess.access(ec, MINE, USER).state, "and access still reads the limit from spend")

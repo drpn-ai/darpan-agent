@@ -227,7 +227,9 @@ class AgentConfig {
         Map<String, String> m = new LinkedHashMap<>(AgentConfigDefaults.ROLE_MODELS)
         for (Map r : roles) {
             String role = r.roleId as String, model = r.modelId as String
-            if (!AgentConfigDefaults.ROLE_MODELS.containsKey(role) || !(model == "none" || validModelId(model))) {
+            // none means escalation off, and only the escalation author may be off: a raw none on a role that must send keeps its default.
+            boolean off = model == "none" && role == AgentConfigDefaults.AUTHOR_ESCALATION
+            if (!AgentConfigDefaults.ROLE_MODELS.containsKey(role) || !(off || (model != "none" && validModelId(model)))) {
                 logger.warn("Ignoring invalid agent role row {} -> '{}'", role, model); continue
             }
             m.put(role, model)

@@ -59,7 +59,7 @@ class AgentOrchestratorTests {
             ["darpan/agent/tools.json"]
 
     /** The key is there: availability is the core switch alone. */
-    static final Closure<String> AVAILABLE = { def e -> AgentAvailability.resolve(AgentSwitch.state(e)) { new Object() } }
+    static final Closure<String> AVAILABLE = { def e, def c, def l -> AgentAvailability.resolve(AgentSwitch.state(e)) { new Object() } }
 
     private ExecutionContext ec
     /** DAR-BE-194: the test user's grant in MINE that every test starts with. */
@@ -585,7 +585,7 @@ class AgentOrchestratorTests {
         assertEquals(0, g.sent.size())
         AGENT_ENTITIES.each { assertEquals(0L, count(it), it) }
 
-        Map unavailable = send(new AgentOrchestrator(g, { e -> AgentAvailability.resolve(AgentSwitch.ON) { null } }), "Why?")
+        Map unavailable = send(new AgentOrchestrator(g, { e, c, l -> AgentAvailability.resolve(AgentSwitch.ON) { null } }), "Why?")
         assertEquals("AGENT_UNAVAILABLE", unavailable.outcome)
         assertEquals(0, g.sent.size())
     }
@@ -1072,6 +1072,27 @@ class AgentOrchestratorTests {
         def g = new AgentRoleLoopTests.ScriptedGateway([router([item("CAUSE_FEEDBACK", "exclude that one", 0.95)])])
         Map out = send(new AgentOrchestrator(g, AVAILABLE), "exclude that one", null)
         assertEquals("QUESTION", out.outcome, "0.95 is below the edited threshold")
+    }
+
+    @Test
+    void "every role asks availability with the turn's snapshot, and an edit mid-turn changes none of it"() {
+        String words = "CM-2002 is a test memo; leave it out."
+        List<AgentConfig> seen = []
+        List<AgentLimits> seenLimits = []
+        Closure<String> recording = { def e, def c, def l -> seen << (c as AgentConfig); seenLimits << (l as AgentLimits); AVAILABLE.call(e, c, l) }
+        def g = new AgentRoleLoopTests.ScriptedGateway([
+                {
+                    AgentConfigTestSupport.set(ec, [AgentRoleConfig: [[roleId: "AUTHOR", modelId: "claude-opus-5-5"]]])
+                    router([item("CAUSE_FEEDBACK", words)])
+                },
+                evidence([fact("findingId", FINDING, "TOOL")]),
+                authorSays([toolUse("tu_1", "ask_human", [question: "Which memo?", options: []])])])
+        send(new AgentOrchestrator(g, recording), words)
+        assertTrue(seen.size() >= 4, "once at the start and once before each of the three roles: ${seen.size()}")
+        assertTrue(seen.every { it.is(seen[0]) }, "every ask got the turn's one AgentConfig")
+        assertTrue(seenLimits.every { it.is(seenLimits[0]) }, "and its one AgentLimits")
+        assertEquals("claude-sonnet-5-5", seen[0].model("AUTHOR"))
+        assertEquals("claude-opus-5-5", AgentConfig.current(ec).model("AUTHOR"), "the edit is for the next turn")
     }
 
     @Test

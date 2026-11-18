@@ -4,6 +4,7 @@ import darpan.agent.claude.AgentClientFactory
 import darpan.agent.claude.AnthropicModelGateway
 import darpan.agent.config.AgentConfig
 import darpan.agent.config.AgentConfigDefaults
+import darpan.agent.config.AgentLimits
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -17,12 +18,19 @@ class AgentAvailability {
 
     private static final Logger logger = LoggerFactory.getLogger(AgentAvailability.class)
 
-    static String state(def ec) {
+    /** For a caller outside a turn (the eval): reads its own snapshot. A turn passes its own, see the three-argument form. */
+    static String state(def ec) { return state(ec, AgentConfig.current(ec), AgentLimits.read()) }
+
+    /**
+     * The state on the caller's config and limits, never a fresh read: a turn asks before every role with its one snapshot, so
+     * a model edited mid-turn neither changes a running turn nor starts a preflight inside it (the preflight answers from
+     * its memory for an unchanged set of models).
+     */
+    static String state(def ec, AgentConfig cfg, AgentLimits lim) {
         String state = resolve(AgentSwitch.state(ec)) { AgentClientFactory.client(ec) }
         if (state != AgentSwitch.ON) return state
-        AgentConfig cfg = AgentConfig.current(ec)
         if (pricingRefusal(cfg)) return AGENT_REFUSED
-        return AgentPreflight.refusal(AnthropicModelGateway.perRequest(ec), cfg) == null ? state : AGENT_REFUSED
+        return AgentPreflight.refusal(AnthropicModelGateway.perRequest(ec), cfg, lim) == null ? state : AGENT_REFUSED
     }
 
     /**
