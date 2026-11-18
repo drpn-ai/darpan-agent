@@ -33,6 +33,23 @@ class AgentPreflightTests {
     }
 
     @Test
+    void "a preflight check reads no setting while it holds its lock"() {
+        AgentConfig cfg = AgentConfig.defaults()
+        darpan.agent.config.AgentLimits lim = darpan.agent.config.AgentLimits.read()
+        int reads = 0
+        try {
+            darpan.config.DarpanSettings.rowLoader = { -> reads++; [:] as Map<String, Map> }
+            darpan.config.DarpanSettings.expire()
+            def accepted = new AgentRoleLoopTests.ScriptedGateway([ok, ok, ok, ok, ok])
+            assertNull(AgentPreflight.refusal(accepted, cfg, lim))
+            assertEquals(5, accepted.sent.size())
+            assertEquals(0, reads, "specs are built before the lock and the sends take no setting")
+        } finally {
+            darpan.config.DarpanSettings.resetForTest()
+        }
+    }
+
+    @Test
     void "a transient failure says nothing about the shape, so it is not remembered"() {
         assertNull(AgentPreflight.refusal(new AgentRoleLoopTests.ScriptedGateway([AgentRoleLoopTests.errors.status(529)])))
         def later = new AgentRoleLoopTests.ScriptedGateway([ok, ok, ok, ok, ok])

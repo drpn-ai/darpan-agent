@@ -112,13 +112,13 @@
             <parameter name="text" required="true" allow-html="any"/>
         </in-parameters>
         <out-parameters>
-            <parameter name="text" type="Map"/>
+            <parameter name="agentText" type="Map"/>
         </out-parameters>
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <set field="saved" from="darpan.agent.config.AgentConfigAdmin.updateAgentText(ec, textId, text)"/>
             <if condition="saved.error"><return error="true" message="${saved.error}"/></if>
-            <set field="text" from="saved.text"/>
+            <set field="agentText" from="saved.agentText"/>
         </actions>
     </service>
 

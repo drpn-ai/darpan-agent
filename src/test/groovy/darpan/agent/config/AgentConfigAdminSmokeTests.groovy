@@ -293,7 +293,7 @@ class AgentConfigAdminSmokeTests {
         assertTrue(svc("update#AgentText", [textId: "reply.NOPE", text: "x"]).errors.contains("Unknown agent text reply.NOPE."))
         assertEquals(0L, count("darpan.agent.AgentText"))
         assertEquals(AgentTextDefaults.validTextError(id, "Slow down."), svc("update#AgentText", [textId: id, text: "Slow down."]).errors[0])
-        Map t = ok(svc("update#AgentText", [textId: id, text: "That is {count} messages this hour; wait a while."])).result.text
+        Map t = ok(svc("update#AgentText", [textId: id, text: "That is {count} messages this hour; wait a while."])).result.agentText
         assertEquals([true, "That is {count} messages this hour; wait a while."], [t.edited, t.text])
         assertEquals("That is 7 messages this hour; wait a while.", AgentConfig.current(ec).text(id, [count: 7]))
         assertEquals(1, audit().size())

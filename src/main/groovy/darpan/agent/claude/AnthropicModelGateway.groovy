@@ -11,7 +11,6 @@ import com.anthropic.models.messages.MessageDeltaUsage
 import com.anthropic.models.messages.RawMessageStreamEvent
 import com.anthropic.models.messages.Usage
 import darpan.agent.config.AgentLimits
-import darpan.config.DarpanSettings
 
 import java.time.Duration
 
@@ -51,6 +50,12 @@ class AnthropicModelGateway implements ModelGateway {
      */
     @Override
     Message send(MessageCreateParams params, Duration timeout) {
+        return send(params, timeout, null)
+    }
+
+    /** As above, with the transport limits of the caller's own snapshot; null reads them from the settings (a caller that has none). */
+    @Override
+    Message send(MessageCreateParams params, Duration timeout, AgentLimits limits) {
         AnthropicClient client
         try {
             client = clientSupplier.call()
@@ -60,18 +65,20 @@ class AnthropicModelGateway implements ModelGateway {
         }
         if (client == null) throw new ModelUnavailableException("No Claude API key is configured")
         if (timeout == null) return accumulate(client.messages().createStreaming(params))
-        return accumulate(client.messages().createStreaming(params, RequestOptions.builder().timeout(attemptTimeout(timeout)).build()))
+        return accumulate(client.messages().createStreaming(params, RequestOptions.builder().timeout(attemptTimeout(timeout, limits)).build()))
     }
 
     /**
-     * Connect and read-idle limits from the settings (transport settings, read per request, not part of a turn's snapshot); the
-     * read limit is an idle timeout, not a whole-body one (OkHttp's read timeout is per socket read, so a live stream that sends
-     * events or pings keeps its whole time); the whole call at most request.
+     * Connect and read-idle limits from the caller's limits snapshot (a turn carries one, so no settings read happens while a lock
+     * is held); the read limit is an idle timeout, not a whole-body one (OkHttp's read timeout is per socket read, so a live stream
+     * that sends events or pings keeps its whole time); the whole call at most request. Without a snapshot they are read from the
+     * settings, per request.
      */
-    static Timeout attemptTimeout(Duration request) {
+    static Timeout attemptTimeout(Duration request, AgentLimits limits = null) {
+        AgentLimits lim = limits ?: AgentLimits.read()
         return Timeout.builder()
-                .connect(Duration.ofMillis(DarpanSettings.intValue(AgentLimits.GATEWAY_CONNECT_TIMEOUT_MS)))
-                .read(Duration.ofMillis(DarpanSettings.intValue(AgentLimits.GATEWAY_READ_IDLE_TIMEOUT_MS)))
+                .connect(Duration.ofMillis(lim.gatewayConnectTimeoutMs))
+                .read(Duration.ofMillis(lim.gatewayReadIdleTimeoutMs))
                 .request(request).build()
     }
 

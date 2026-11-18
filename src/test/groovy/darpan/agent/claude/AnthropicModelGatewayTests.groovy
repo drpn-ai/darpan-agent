@@ -94,6 +94,21 @@ class AnthropicModelGatewayTests {
     }
 
     @Test
+    void "a limits snapshot given to attemptTimeout means no settings read"() {
+        int reads = 0
+        try {
+            darpan.config.DarpanSettings.rowLoader = { -> reads++; [:] as Map<String, Map> }
+            darpan.config.DarpanSettings.expire()
+            def lim = new darpan.agent.config.AgentLimits(gatewayConnectTimeoutMs: 4000, gatewayReadIdleTimeoutMs: 20000)
+            def t = AnthropicModelGateway.attemptTimeout(java.time.Duration.ofSeconds(9), lim)
+            assertEquals([java.time.Duration.ofMillis(4000), java.time.Duration.ofMillis(20000)], [t.connect(), t.read()])
+            assertEquals(0, reads, "the turn's snapshot is used; the settings are not read")
+        } finally {
+            darpan.config.DarpanSettings.resetForTest()
+        }
+    }
+
+    @Test
     void "the client is looked up on every request and a missing one is unavailable"() {
         int lookups = 0
         def gateway = AnthropicModelGateway.supplying { lookups++; null }

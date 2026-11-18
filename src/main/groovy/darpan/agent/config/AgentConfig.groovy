@@ -26,7 +26,8 @@ class AgentConfig {
     private static final String WHY = "agent config: global settings"
     /** At most 63 characters in all: the modelId columns are text-short (VARCHAR(63) on MySQL), so a longer id could never be saved. */
     private static final String MODEL_ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$'
-    private static final BigDecimal MAX_PRICE = 10000G
+    /** The one ceiling on a price, dollars per million tokens: the admin save refuses above it and a loaded row above it is dropped. */
+    static final BigDecimal MAX_PRICE = 1000G
 
     /** Seams: the clock, the loader, and whether the framework is up. */
     static Closure<Long> clock = { -> System.currentTimeMillis() }

@@ -23,7 +23,7 @@ class AgentConfigAdmin {
     private static final String WHY = "agent config admin: instance-wide agent config"
     private static final String SVC = "admin.AgentConfigAdminServices."
     private static final List<String> PRICE_FIELDS = ["inputUsdPerMTok", "outputUsdPerMTok", "cacheReadUsdPerMTok", "cacheWriteUsdPerMTok"]
-    private static final BigDecimal MAX_PRICE = 1000G
+    private static final BigDecimal MAX_PRICE = AgentConfig.MAX_PRICE
     static final String NONE = "none"
 
     // ------------------------------------------------------------------ reads
@@ -161,7 +161,7 @@ class AgentConfigAdmin {
         List<BigDecimal> v = [input, output, cacheRead, cacheWrite].collect { decimal(it) }
         // number-decimal keeps 6 places: a finer price would save as 0 and silently unprice the model.
         if (v.any { it == null || it.stripTrailingZeros().scale() > 6 || it < 0G || it > MAX_PRICE } || v[0] <= 0G || v[1] <= 0G) {
-            return [error: "Prices are dollars per million tokens: input and output above 0, cache prices 0 or more, none above 1000."]
+            return [error: "Prices are dollars per million tokens: input and output above 0, cache prices 0 or more, none above ${MAX_PRICE.toPlainString()}.".toString()]
         }
         AgentConfig cfg = AgentConfig.load(ec)
         ModelPrice was = cfg.price(model)
@@ -189,7 +189,7 @@ class AgentConfigAdmin {
         AdminAuditSupport.record(ec, SVC + "update#AgentText", "AgentText", textId,
                 "Agent text ${textId}: \"${was}\" -> \"${text}\"".toString())
         AgentConfig.expireAfterCommit(ec)
-        return [text: textMap(textId, AgentConfig.load(ec), row(ec, "darpan.agent.AgentText", [textId: textId]))]
+        return [agentText: textMap(textId, AgentConfig.load(ec), row(ec, "darpan.agent.AgentText", [textId: textId]))]
     }
 
     // ------------------------------------------------------------------ tenant caps

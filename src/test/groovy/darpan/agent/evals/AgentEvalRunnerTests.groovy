@@ -411,13 +411,48 @@ class AgentEvalRunnerTests {
     }
 
     @Test
+    void "withoutCapRows puts the loader back when the body throws"() {
+        Closure rows = { -> [:] as Map<String, Map> }
+        try {
+            DarpanSettings.rowLoader = rows
+            assertThrows(IllegalStateException) { AgentEvalRunner.withoutCapRows { throw new IllegalStateException("boom") } }
+            assertSame(rows, DarpanSettings.rowLoader, "the loader is put back")
+        } finally {
+            DarpanSettings.resetForTest()
+        }
+    }
+
+    @Test
+    void "a local tenant cap cannot lift the eval's budget and a local price cannot change its estimate"() {
+        String tenant = "EVAL_TENANT"
+        AgentConfig local = AgentConfig.defaults().with(tenantCaps: [(tenant): 1000.0],
+                prices: ["claude-haiku-5-5": new darpan.agent.config.ModelPrice(0.0001G, 0.0001G, 0G, 0G)])
+        List<Map> requests = [[model: "claude-haiku-5-5", chars: 3500, maxTokens: 2000L]]
+        try {
+            AgentEvalRunner.configureAgent(2G)
+            AgentConfig.withConfig(local) {
+                assertEquals(0, new BigDecimal(1000).compareTo(AgentConfig.current(null).tenantCap(tenant)), "the local row would win without the guard")
+                AgentEvalRunner.withShippedConfig {
+                    AgentConfig cfg = AgentConfig.current(null)
+                    assertNull(cfg.tenantCap(tenant))
+                    assertEquals(0, 2G.compareTo(AgentOrchestrator.dailyCapUsd(tenant, cfg, AgentLimits.read())), "the -D budget is the cap")
+                    assertEquals(350L, AgentEvalRunner.estimateFrom(requests, "x", 1, 1).totalMicros, "priced at the shipped price")
+                }
+            }
+        } finally {
+            DarpanSettings.resetForTest()
+            AgentEvalRunner.configureAgent(AgentEvalRunner.DEFAULT_BUDGET_USD)
+        }
+    }
+
+    @Test
     void "the author model override is a config override, not a row"() {
         String before = System.getProperty(AgentEvalRunner.AUTHOR_MODEL_PROPERTY)
         try {
             System.clearProperty(AgentEvalRunner.AUTHOR_MODEL_PROPERTY)
-            assertEquals("claude-sonnet-5-5", AgentEvalRunner.withAuthorModel { AgentConfig.current(ec).model("AUTHOR") })
+            assertEquals("claude-sonnet-5-5", AgentEvalRunner.withShippedConfig { AgentConfig.current(ec).model("AUTHOR") })
             System.setProperty(AgentEvalRunner.AUTHOR_MODEL_PROPERTY, "claude-haiku-5-5")
-            assertEquals(["claude-haiku-5-5", "claude-sonnet-5-5"], AgentEvalRunner.withAuthorModel { [AgentConfig.current(ec).model("AUTHOR"), AgentConfig.current(ec).model("ROUTER")] })
+            assertEquals(["claude-haiku-5-5", "claude-sonnet-5-5"], AgentEvalRunner.withShippedConfig { [AgentConfig.current(ec).model("AUTHOR"), AgentConfig.current(ec).model("ROUTER")] })
             assertEquals("claude-sonnet-5-5", AgentConfig.current(ec).model("AUTHOR"), "outside the run the config is untouched")
             boolean was = ec.artifactExecution.disableAuthz()
             try { assertNull(ec.entity.find("darpan.agent.AgentRoleConfig").condition("roleId", "AUTHOR").one(), "no row written") }

@@ -238,11 +238,16 @@ class AgentEvalRunner {
         }
     }
 
-    /** Runs body on the author model named by -Ddarpan.agent.authorModel as a config override (no row written); unset, as it is. */
-    static <T> T withAuthorModel(Closure<T> body) {
+    /**
+     * Runs body on the shipped AgentConfig defaults (models, prices, prompts, texts, no tenant caps), whatever this machine's rows say:
+     * a local tenant-cap row for the eval tenant would lift the budget and a local price edit would under-price the ledger and the
+     * estimate. -Ddarpan.agent.authorModel, when set, is applied as the one override (no row written). The estimate runs inside too.
+     */
+    static <T> T withShippedConfig(Closure<T> body) {
         String model = System.getProperty(AUTHOR_MODEL_PROPERTY)?.trim()
-        if (!model) return body.call()
-        return AgentConfig.withConfig(AgentConfig.current(null).with(models: [(AgentConfigDefaults.AUTHOR): model]), body)
+        AgentConfig shipped = AgentConfig.defaults()
+        if (model) shipped = shipped.with(models: [(AgentConfigDefaults.AUTHOR): model])
+        return AgentConfig.withConfig(shipped, body)
     }
 
     /** The synthetic tenant, its run and conclusion tree, the audit and the frozen findings with their records. */
@@ -904,7 +909,7 @@ class AgentEvalRunner {
         configureAgent(budget)
         ExecutionContext ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "agent-eval")
         try {
-            return withoutCapRows { withAuthorModel { runLive(ec, out, evalDir, reportRoot, budget, cases, paid) } }
+            return withoutCapRows { withShippedConfig { runLive(ec, out, evalDir, reportRoot, budget, cases, paid) } }
         } finally {
             ReconciliationSmokeTestSupport.cleanupMoqui(ec)
         }
@@ -912,35 +917,31 @@ class AgentEvalRunner {
 
     private static int runLive(ExecutionContext ec, PrintStream out, File evalDir, File reportRoot, BigDecimal budget, List<Map> cases, boolean paid) {
         AgentConfig cfg = AgentConfig.current(ec)
-        try {
-            AgentEvalRunner runner = new AgentEvalRunner(ec, evalDir)
-            runner.seed()
-            Map est = runner.estimate(cases.find { it.id == ESTIMATE_CASE } ?: cases[0], cases.size(), RUNS)
-            printEstimate(out, est, budget)
-            if (!paid) {
-                out.println("[agent-eval] not run: pass -PagentEvalConfirm=yes")
-                return 0
-            }
-            runner.actAs()
-            String state = AgentAvailability.state(ec)
-            if (state != AgentSwitch.ON) {
-                out.println((state == AgentAvailability.AGENT_REFUSED ?
-                        "[agent-eval] not run: the Claude API refused a role's request shape, nothing else was sent: ${AgentPreflight.refusal(AnthropicModelGateway.perRequest(ec))}" :
-                        "[agent-eval] not run: the agent reads ${state} in this JVM (is ANTHROPIC_API_KEY exported in the shell that runs Gradle?)").toString())
-                return 1
-            }
-            ModelGateway gateway = realGateway(ec)
-            Map meta = [mode: "LIVE", runs: RUNS, cases: cases*.id, budgetUsd: budget.toPlainString(),
-                        models: [router: cfg.model(AgentConfigDefaults.ROUTER), investigator: cfg.model(AgentConfigDefaults.INVESTIGATOR), author: cfg.model(AgentConfigDefaults.AUTHOR)]]
-            Map done = runner.runAndReport(cases, { Map c, int run -> gateway }, { def e, def c, def l -> AgentAvailability.state(e, c, l) }, reportRoot, est, meta, out)
-            Map summary = (Map) done.summary
-            File dir = (File) done.dir
-            out.println("[agent-eval] gate ${summary.gate.verdict}: injection ${summary.injection.passedCases}/${summary.injection.cases}, router ${summary.router.percent}, overall ${summary.overall.percent}; cost ${summary.cost.totalUsd}".toString())
-            out.println("[agent-eval] report: ${dir}".toString())
-            return summary.gate.verdict == "PASS" ? 0 : 2
-        } finally {
-            ec.message.clearAll()
+        AgentEvalRunner runner = new AgentEvalRunner(ec, evalDir)
+        runner.seed()
+        Map est = runner.estimate(cases.find { it.id == ESTIMATE_CASE } ?: cases[0], cases.size(), RUNS)
+        printEstimate(out, est, budget)
+        if (!paid) {
+            out.println("[agent-eval] not run: pass -PagentEvalConfirm=yes")
+            return 0
         }
+        runner.actAs()
+        String state = AgentAvailability.state(ec)
+        if (state != AgentSwitch.ON) {
+            out.println((state == AgentAvailability.AGENT_REFUSED ?
+                    "[agent-eval] not run: the Claude API refused a role's request shape, nothing else was sent: ${AgentPreflight.refusal(AnthropicModelGateway.perRequest(ec))}" :
+                    "[agent-eval] not run: the agent reads ${state} in this JVM (is ANTHROPIC_API_KEY exported in the shell that runs Gradle?)").toString())
+            return 1
+        }
+        ModelGateway gateway = realGateway(ec)
+        Map meta = [mode: "LIVE", runs: RUNS, cases: cases*.id, budgetUsd: budget.toPlainString(),
+                    models: [router: cfg.model(AgentConfigDefaults.ROUTER), investigator: cfg.model(AgentConfigDefaults.INVESTIGATOR), author: cfg.model(AgentConfigDefaults.AUTHOR)]]
+        Map done = runner.runAndReport(cases, { Map c, int run -> gateway }, { def e, def c, def l -> AgentAvailability.state(e, c, l) }, reportRoot, est, meta, out)
+        Map summary = (Map) done.summary
+        File dir = (File) done.dir
+        out.println("[agent-eval] gate ${summary.gate.verdict}: injection ${summary.injection.passedCases}/${summary.injection.cases}, router ${summary.router.percent}, overall ${summary.overall.percent}; cost ${summary.cost.totalUsd}".toString())
+        out.println("[agent-eval] report: ${dir}".toString())
+        return summary.gate.verdict == "PASS" ? 0 : 2
     }
 
     static void printEstimate(PrintStream out, Map est, BigDecimal budget) {

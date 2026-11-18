@@ -70,7 +70,7 @@ class EmailSmileWriter {
                 logger.warn("Email smile {}: the model '{}' has no price; the template's line goes", key, model)
                 return null
             }
-            Message message = gatewayFor.call(ec).send(params(brief, fallback, cfg, lim), Duration.ofMillis(lim.emailSmileTimeoutMs))
+            Message message = gatewayFor.call(ec).send(params(brief, fallback, cfg, lim), Duration.ofMillis(lim.emailSmileTimeoutMs), lim)
             logger.info("Email smile {}: {} in, {} out, {} micro-USD", key, message.usage().inputTokens(),
                     message.usage().outputTokens(), AgentUsageLedger.costMicros(model, message.usage(), cfg))
             if (message.stopReason().orElse(null) != StopReason.END_TURN) return null

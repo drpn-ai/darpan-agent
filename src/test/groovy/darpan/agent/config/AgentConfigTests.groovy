@@ -95,6 +95,17 @@ class AgentConfigTests {
     }
 
     @Test
+    @DisplayName("a loaded price above the one ceiling (the admin save's) is dropped, at the ceiling it is kept")
+    void priceCeiling() {
+        assertDec(1000, AgentConfig.MAX_PRICE)
+        AgentConfigTestSupport.set(ec, [AgentModelPrice: [
+                [modelId: "claude-at-1", inputUsdPerMTok: 1000, outputUsdPerMTok: 5, cacheReadUsdPerMTok: 0, cacheWriteUsdPerMTok: 0],
+                [modelId: "claude-over-1", inputUsdPerMTok: 1000.01, outputUsdPerMTok: 5, cacheReadUsdPerMTok: 0, cacheWriteUsdPerMTok: 0]]])
+        assertDec(1000, AgentConfig.current(ec).price("claude-at-1").input)
+        assertNull(AgentConfig.current(ec).price("claude-over-1"))
+    }
+
+    @Test
     @DisplayName("unpricedRoles lists a role whose model has no price and skips an escalation set to none")
     void unpricedRoles() {
         AgentConfigTestSupport.set(ec, [AgentRoleConfig: [[roleId: "ROUTER", modelId: "claude-unpriced-1"], [roleId: "AUTHOR_ESCALATION", modelId: "none"]]])

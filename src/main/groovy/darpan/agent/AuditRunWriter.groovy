@@ -67,7 +67,7 @@ class AuditRunWriter {
                 logger.warn("Audit run words for {}: the model '{}' has no price; sent without words", tenantId, model)
                 return [:]
             }
-            Message message = gatewayFor.call(ec).send(params(facts, cfg, lim), Duration.ofMillis(lim.auditRunWordsTimeoutMs))
+            Message message = gatewayFor.call(ec).send(params(facts, cfg, lim), Duration.ofMillis(lim.auditRunWordsTimeoutMs), lim)
             logger.info("Audit run words for {}: {} in, {} out, {} micro-USD", tenantId, message.usage().inputTokens(),
                     message.usage().outputTokens(), AgentUsageLedger.costMicros(model, message.usage(), cfg))
             StopReason stop = message.stopReason().orElse(null)

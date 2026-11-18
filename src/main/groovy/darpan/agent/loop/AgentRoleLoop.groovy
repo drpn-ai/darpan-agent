@@ -82,7 +82,7 @@ class AgentRoleLoop {
         int retries = 0
         while (true) {
             try {
-                return gateway.send(params, Duration.ofMillis(Math.max(1L, deadline - now())))
+                return gateway.send(params, Duration.ofMillis(Math.max(1L, deadline - now())), limits)
             } catch (RuntimeException e) {
                 if (!retryable(e) || retries >= limits.requestMaxRetries) throw e
                 Long after = retryAfterMs(e)
