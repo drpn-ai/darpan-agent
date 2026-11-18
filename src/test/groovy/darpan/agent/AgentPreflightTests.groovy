@@ -1,6 +1,7 @@
 package darpan.agent
 
 import com.anthropic.models.messages.MessageCreateParams
+import darpan.agent.config.AgentConfig
 import darpan.agent.loop.AgentRoleLoopTests
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -38,5 +39,23 @@ class AgentPreflightTests {
         assertNull(AgentPreflight.refusal(later))
         assertEquals(5, later.sent.size(), "the next call asks again")
         assertTrue(later.sent.every { MessageCreateParams p -> p.maxTokens() == AgentPreflight.MAX_TOKENS })
+    }
+
+    @Test
+    void "preflight asks again when a turn role's model changes"() {
+        def accepted = new AgentRoleLoopTests.ScriptedGateway([ok, ok, ok, ok, ok])
+        assertNull(AgentPreflight.refusal(accepted, AgentConfig.defaults()))
+        assertEquals(5, accepted.sent.size())
+
+        AgentConfig typo = AgentConfig.defaults().with(models: [ROUTER: "claude-typo-1"])
+        def refused = new AgentRoleLoopTests.ScriptedGateway([AgentRoleLoopTests.errors.status(404)])
+        String why = AgentPreflight.refusal(refused, typo)
+        assertTrue(why?.startsWith("ROUTER claude-typo-1"), why)
+        assertEquals(1, refused.sent.size(), "the changed model was asked, not the remembered answer")
+        assertEquals(why, AgentPreflight.refusal(new AgentRoleLoopTests.ScriptedGateway([]), typo), "the same models stay remembered")
+
+        def back = new AgentRoleLoopTests.ScriptedGateway([ok, ok, ok, ok, ok])
+        assertNull(AgentPreflight.refusal(back, AgentConfig.defaults()), "fixing the model asks again and the agent is back")
+        assertEquals(5, back.sent.size())
     }
 }

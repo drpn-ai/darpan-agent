@@ -23,9 +23,9 @@ import java.util.concurrent.atomic.AtomicLong
 class AgentConfig {
     private static final Logger logger = LoggerFactory.getLogger(AgentConfig)
     static final long TTL_MS = 30_000L
-    static final String CAP_KEY = "darpan.agent.dailyUsdCapPerTenant"
     private static final String WHY = "agent config: global settings"
-    private static final String MODEL_ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$'
+    /** At most 63 characters in all: the modelId columns are text-short (VARCHAR(63) on MySQL), so a longer id could never be saved. */
+    private static final String MODEL_ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$'
     private static final BigDecimal MAX_PRICE = 10000G
 
     /** Seams: the clock, the loader, and whether the framework is up. */
@@ -106,7 +106,13 @@ class AgentConfig {
     BigDecimal tenantCap(String tenantId) {
         BigDecimal v = tenantId == null ? null : tenantCaps.get(tenantId)
         if (v == null) return null
-        SettingDefinition d = DarpanSettings.catalog().get(CAP_KEY)
+        SettingDefinition d
+        try {
+            d = DarpanSettings.catalog().get(AgentLimits.DAILY_USD_CAP_PER_TENANT)
+        } catch (Throwable t) {
+            logger.warn("Agent tenant cap range could not be read ({}); using the global cap", t.toString())
+            return null
+        }
         if (d == null || (d.min != null && v < d.min) || (d.max != null && v > d.max)) {
             logger.warn("Agent tenant cap {} for {} is outside the allowed range; using the global cap", v, tenantId)
             return null
@@ -234,7 +240,7 @@ class AgentConfig {
         }
         Map<String, BigDecimal> c = new LinkedHashMap<>()
         for (Map r : capRows) {
-            String tenant = r.companyUserGroupId as String
+            String tenant = r.tenantUserGroupId as String
             if (!tenant || r.dailyUsdCap == null) continue
             c.put(tenant, new BigDecimal(r.dailyUsdCap.toString()))
         }

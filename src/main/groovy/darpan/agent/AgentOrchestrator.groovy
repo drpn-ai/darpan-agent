@@ -7,6 +7,7 @@ import com.anthropic.models.messages.TextBlockParam
 import com.anthropic.models.messages.ToolResultBlockParam
 import darpan.agent.claude.AnthropicModelGateway
 import darpan.agent.claude.ModelGateway
+import darpan.agent.config.AgentConfig
 import darpan.agent.config.AgentLimits
 import darpan.agent.loop.AgentRoleLoop
 import darpan.agent.loop.AgentToolExecutor
@@ -14,7 +15,6 @@ import darpan.agent.loop.AgentUsageLedger
 import darpan.agent.loop.RoleResult
 import darpan.agent.loop.RoleSpec
 import darpan.agent.loop.TenantChangedException
-import darpan.config.DarpanSettings
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import groovy.json.JsonOutput
@@ -41,7 +41,7 @@ import java.util.regex.Pattern
  *            prose answer) and the brain catalog in its cached prefix. DISPLAY_FEEDBACK and PRODUCT_BUG go to it with
  *            raise_ticket only.
  *
- * The whole turn is capped at 240 s: each role's wall clock is the smaller of its own and what is left, and a role that
+ * The whole turn is capped at the turnWallClockMs setting: each role's wall clock is the smaller of its own and what is left, and a role that
  * would start with less than {@link #MIN_ROLE_MS} left does not start (outcome INCOMPLETE).
  *
  * Outcomes: AGENT_OFF, AGENT_UNAVAILABLE, AI_NOT_GRANTED, AI_EXPIRED, AI_PAUSED (DAR-BE-194: the person has no live grant of
@@ -52,13 +52,8 @@ import java.util.regex.Pattern
 class AgentOrchestrator {
     private static final Logger logger = LoggerFactory.getLogger(AgentOrchestrator.class)
 
-    static final long OVERALL_CAP_MS = 240_000L
     /** A role that could not send one request in time (AgentRoleLoop.MIN_REQUEST_TIMEOUT_MS) does not start. */
     static final long MIN_ROLE_MS = AgentRoleLoop.MIN_REQUEST_TIMEOUT_MS
-    static final BigDecimal MIN_CONFIDENCE = 0.6G
-    static final int MAX_EVIDENCE_ROUNDS = 2
-    static final int MAX_TEXT_CHARS = 20_000
-    static final int EARLIER_TURNS = 4
 
     static final String DECLINE = "That is outside what I can do here. I create and maintain this tenant's audit checks: setting up an audit, its statements and checks, why a finding is open or closed, and changes to their rules, exclusions, fix wording and causes. Ask about one of those."
     /** The reply when a turn would otherwise end with nothing for the person: never an empty answer. */
@@ -68,17 +63,12 @@ class AgentOrchestrator {
     static final String CLARIFY = "Which finding, record or statement do you mean?"
 
     static final Set<String> BRAIN_KINDS = (["CAUSE_FEEDBACK", "RULE_NEW", "RULE_CHANGE", "CORRECTION", "SETUP"] as Set<String>).asImmutable()
-    /** Requests the investigator gets when every item of the turn is an EXPLAIN. */
-    static final int EXPLAIN_MAX_REQUESTS = 5
     static final Set<String> ANSWER_KINDS = (["EXPLAIN", "INVESTIGATION_PASTE"] as Set<String>).asImmutable()
     static final Set<String> TICKET_KINDS = (["DISPLAY_FEEDBACK", "PRODUCT_BUG"] as Set<String>).asImmutable()
 
     static final Map ROUTER_SCHEMA = AgentToolExecutor.schemaResource("darpan/agent/schemas/router-items.json").asImmutable()
     static final Map EVIDENCE_SCHEMA = AgentToolExecutor.schemaResource("darpan/agent/schemas/evidence.json").asImmutable()
 
-    static final int MAX_ITEMS = 10
-    static final int MAX_FACTS = 100
-    static final int MAX_ANSWER_CHARS = 4_000
     private static final Pattern FIELD_NAME = Pattern.compile(/^[A-Za-z][A-Za-z0-9_.]{0,63}$/)
     /** A JSONPath field expression ($.records[*].tranId): the one non-token value Evidence keeps. */
     private static final Pattern FIELD_EXPRESSION = Pattern.compile(/^\$(?:\.[A-Za-z0-9_]{1,64}|\[\*\]|\[\d{1,4}\]){1,12}$/)
@@ -92,7 +82,6 @@ class AgentOrchestrator {
     final Closure<String> availability
     /** Milliseconds now; tests move it. */
     Closure<Long> clock = { System.currentTimeMillis() }
-    long overallCapMs = OVERALL_CAP_MS
 
     AgentOrchestrator(ModelGateway gateway, Closure<String> availability) {
         this.gateway = gateway
@@ -132,13 +121,19 @@ class AgentOrchestrator {
     Map send(def ec, String conversationId, String auditId, String findingId, String text, String auditCode = null) {
         String state = availability.call(ec)
         if (state != AgentSwitch.ON) return response(conversationId, state ?: AgentSwitch.AGENT_OFF, unavailableReply(state))
+        // DAR-BE-307: one config and one limits snapshot for the whole turn, taken here and never inside a lock; every role and
+        // check below reads from these two, so an edit made mid-turn waits for the next turn.
+        AgentConfig cfg = AgentConfig.current(ec)
+        AgentLimits lim = AgentLimits.read()
+        // A role whose model has no price never sends: its spend could not be counted. Checked on this turn's own snapshot.
+        if (AgentAvailability.pricingRefusal(cfg)) return response(conversationId, AgentAvailability.AGENT_REFUSED, unavailableReply(AgentAvailability.AGENT_REFUSED))
 
         String pinned = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         String userId = ec.user.userId as String
         if (!pinned || !userId) { ec.message.addError("No active tenant."); return null }
         if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Only editors and tenant admins can talk to the agent.")) return null
         if (!text?.trim()) { ec.message.addError("Say what you want to know or change."); return null }
-        if (text.length() > MAX_TEXT_CHARS) { ec.message.addError("The message is longer than ${MAX_TEXT_CHARS} characters; send it in parts.".toString()); return null }
+        if (text.length() > lim.maxMessageChars) { ec.message.addError("The message is longer than ${lim.maxMessageChars} characters; send it in parts.".toString()); return null }
         if (!auditId == !auditCode) { ec.message.addError("Name the audit by its id or by its code, not both."); return null }
         def audit = auditId ? TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.Audit", "auditId", auditId, pinned, WHY)
                 : TenantScopedFinder.findTenantScoped(ec, "darpan.audit.Audit").condition("auditCode", auditCode).useCache(false).one()
@@ -158,18 +153,18 @@ class AgentOrchestrator {
         // DAR-BE-194: the person needs a live grant of AI access in this tenant (a Darpan admin gives it); nothing is written otherwise.
         Map access = AgentAccess.access(ec, pinned, userId)
         if (access.state != AgentAccess.LIVE) return response(conversationId, accessOutcome(access), accessReply(access))
-        int turnLimit = turnsPerHour()
+        int turnLimit = lim.turnsPerUserPerHour
         if (turnsInLastHour(ec, userId) >= turnLimit)
             return response(conversationId, "RATE_LIMITED", "You have sent ${turnLimit} messages to the agent in the last hour; try again later.".toString())
-        if (overDailyCap(ec, pinned)) return response(conversationId, "OVER_BUDGET", "The agent's budget for this tenant is spent for today (UTC).")
+        if (overDailyCap(ec, pinned, cfg, lim)) return response(conversationId, "OVER_BUDGET", "The agent's budget for this tenant is spent for today (UTC).")
 
         Map scrubbed = PasteScrubber.scrub(text)
         Turn turn = new Turn(ec: ec, pinned: pinned, userId: userId, grantId: access.grantId as String, auditId: auditId, auditCode: audit.auditCode as String, findingId: findingId,
-                words: scrubbed.text as String, masked: (List<String>) scrubbed.masked, deadline: clock.call() + overallCapMs)
+                words: scrubbed.text as String, masked: (List<String>) scrubbed.masked, deadline: clock.call() + lim.turnWallClockMs, cfg: cfg, limits: lim)
         boolean fresh = conversation == null
         turn.conversationId = fresh ? TenantScopedFinder.mintId(ec, "darpan.agent.AgentConversation", "conversationId") : conversationId
         turn.transcript = transcriptFor(ec, pinned, turn.conversationId)
-        turn.earlier = turn.transcript.earlierUserTexts(EARLIER_TURNS)
+        turn.earlier = turn.transcript.earlierUserTexts(lim.earlierTurns)
         turn.lastQuestion = turn.transcript.lastQuestion()
 
         try {
@@ -295,13 +290,13 @@ class AgentOrchestrator {
         Map evidence = [facts: []]
         // A turn of corrections only, on the finding the last facts were found for, reuses them: the investigator would
         // re-read the same records. The author can still ask for more (request_more_evidence).
-        List<Map> carried = items.every { it.kind == "CORRECTION" } ? turn.transcript.lastFacts(turn.findingId) : null
+        List<Map> carried = items.every { it.kind == "CORRECTION" } ? turn.transcript.lastFacts(turn.findingId, turn.limits) : null
         if (carried) {
             evidence = [facts: carried, carried: true]
             turn.facts = carried
         } else if (brain || answer) {
             // A follow-up on the same finding starts from the facts already found, and reads only what is missing.
-            List<Map> earlier = turn.findingId ? turn.transcript.lastFacts(turn.findingId) : null
+            List<Map> earlier = turn.findingId ? turn.transcript.lastFacts(turn.findingId, turn.limits) : null
             Map found = investigate(turn, items, null, earlier ?: [])
             // A question deserves an answer: one more request from the facts already found, before any reply goes out empty.
             if (answer && !found.answer && !found.stopped) {
@@ -315,26 +310,26 @@ class AgentOrchestrator {
             if (found.stopped && !brain) { turn.outcome = "INCOMPLETE"; turn.replyParts << stoppedReply(found.stopped as String); return }
         }
         if (brain) authorWithEscalation(turn, items, evidence)
-        else if (items.any { it.kind in TICKET_KINDS }) author(turn, items.findAll { it.kind in TICKET_KINDS }, null, RoleSpec.author().copy(tools: ["raise_ticket"]))
+        else if (items.any { it.kind in TICKET_KINDS }) author(turn, items.findAll { it.kind in TICKET_KINDS }, null, RoleSpec.author(turn.cfg, turn.limits).copy(tools: ["raise_ticket"]))
     }
 
     // ---------------------------------------------------------------- router
 
     /** The router's items, or null when the turn already ended on its question. */
     private List<Map> route(Turn turn) {
-        RoleResult r = role(turn, RoleSpec.router(ROUTER_SCHEMA), [MessageParam.ofUser(routerInput(turn))])
+        RoleResult r = role(turn, RoleSpec.router(ROUTER_SCHEMA, turn.cfg, turn.limits), [MessageParam.ofUser(routerInput(turn))])
         if (r.outcome != "DONE") throw new Stop("INCOMPLETE", "I could not read that message; try again.")
         Object parsed = parseJson(r.text())
         if (!(parsed instanceof Map) || AgentToolExecutor.validate(ROUTER_SCHEMA, parsed)) {
             logger.warn("Router output in conversation ${turn.conversationId} is off its schema".toString())
             throw new Stop("INCOMPLETE", "I could not read that message; try again.")
         }
-        List<Map> items = ((List<Map>) ((Map) parsed).items).take(MAX_ITEMS)
+        List<Map> items = ((List<Map>) ((Map) parsed).items).take(turn.limits.maxItems)
         String question = ((Map) parsed).question?.toString()?.trim()
         // With a finding open the person's "it" or "this" has its referent, so a low score alone is no reason to ask which
         // finding they mean (the first paid eval ended a plain exclusion on that question); a question the router wrote
         // itself is still asked.
-        boolean unsure = !turn.findingId && items.any { (it.confidence as BigDecimal) < MIN_CONFIDENCE }
+        boolean unsure = !turn.findingId && items.any { (it.confidence as BigDecimal) < turn.limits.minConfidence }
         if (question || unsure) {
             turn.question = [text: question ?: CLARIFY, options: [], from: RoleSpec.ROUTER]
             turn.outcome = "QUESTION"
@@ -359,14 +354,14 @@ class AgentOrchestrator {
 
     /** [facts, answer, stopped (the role's outcome when it did not finish)]. */
     private Map investigate(Turn turn, List<Map> items, String need, List<Map> priorFacts) {
-        RoleSpec spec = RoleSpec.investigator().copy(outputSchema: EVIDENCE_SCHEMA)
+        RoleSpec spec = RoleSpec.investigator(turn.cfg, turn.limits).copy(outputSchema: EVIDENCE_SCHEMA)
         // A why-question needs a short look, not the full read budget.
-        if (items && items.every { it.kind == "EXPLAIN" }) spec = spec.copy(maxRequests: Math.min(spec.maxRequests, EXPLAIN_MAX_REQUESTS))
+        if (items && items.every { it.kind == "EXPLAIN" }) spec = spec.copy(maxRequests: Math.min(spec.maxRequests, turn.limits.explainMaxRequests))
         RoleResult r = role(turn, spec, [MessageParam.ofUser(investigatorInput(turn, items, need, priorFacts))])
         if (r.outcome != "DONE") return [facts: priorFacts, answer: null, stopped: r.outcome]
-        Map typed = typedEvidence(parseJson(r.text()))
+        Map typed = typedEvidence(parseJson(r.text()), turn.limits)
         if (typed == null) return [facts: priorFacts, answer: null, stopped: "INVALID_EVIDENCE"]
-        return [facts: mergeFacts(priorFacts, (List<Map>) typed.facts), answer: typed.answer, stopped: null]
+        return [facts: mergeFacts(priorFacts, (List<Map>) typed.facts, turn.limits.maxFacts), answer: typed.answer, stopped: null]
     }
 
     private String investigatorInput(Turn turn, List<Map> items, String need, List<Map> priorFacts) {
@@ -388,11 +383,11 @@ class AgentOrchestrator {
      * strict token (or a JSONPath field expression) and anything else "<populated>"; the answer kept apart. Null when the
      * output is not an object with a facts list.
      */
-    static Map typedEvidence(Object raw) {
+    static Map typedEvidence(Object raw, AgentLimits lim) {
         if (!(raw instanceof Map) || !(((Map) raw).facts instanceof List)) return null
         List<Map> facts = []
         ((List) ((Map) raw).facts).each { Object f ->
-            if (!(f instanceof Map) || facts.size() >= MAX_FACTS) return
+            if (!(f instanceof Map) || facts.size() >= lim.maxFacts) return
             Map fact = (Map) f
             String field = fact.field instanceof String ? AgentRedaction.normalize((String) fact.field) : null
             String source = fact.source as String
@@ -407,7 +402,7 @@ class AgentOrchestrator {
         }
         Object answer = ((Map) raw).answer
         String text = answer instanceof String && ((String) answer).trim() ? ((String) answer).trim() : null
-        if (text != null && text.length() > MAX_ANSWER_CHARS) text = text.substring(0, MAX_ANSWER_CHARS)
+        if (text != null && text.length() > lim.maxAnswerChars) text = text.substring(0, lim.maxAnswerChars)
         return [facts: facts, answer: text]
     }
 
@@ -418,9 +413,9 @@ class AgentOrchestrator {
         return AgentRedaction.safeValue(s)
     }
 
-    private static List<Map> mergeFacts(List<Map> prior, List<Map> fresh) {
+    private static List<Map> mergeFacts(List<Map> prior, List<Map> fresh, int maxFacts) {
         List<Map> out = new ArrayList<Map>(prior ?: [])
-        (fresh ?: []).each { if (!(it in out) && out.size() < MAX_FACTS) out << it }
+        (fresh ?: []).each { if (!(it in out) && out.size() < maxFacts) out << it }
         return out
     }
 
@@ -433,8 +428,8 @@ class AgentOrchestrator {
      */
     private void authorWithEscalation(Turn turn, List<Map> items, Map evidence) {
         int made = turn.proposals.size() + turn.tickets.size()
-        author(turn, items, evidence, RoleSpec.author())
-        RoleSpec stronger = RoleSpec.escalationAuthor()
+        author(turn, items, evidence, RoleSpec.author(turn.cfg, turn.limits))
+        RoleSpec stronger = RoleSpec.escalationAuthor(turn.cfg, turn.limits)
         boolean doubtful = turn.outcome == null && turn.question?.from == RoleSpec.AUTHOR && turn.proposals.size() + turn.tickets.size() == made
         if (!doubtful || stronger == null) return
         turn.question = null
@@ -470,7 +465,7 @@ class AgentOrchestrator {
                 return
             }
             rounds++
-            if (rounds > MAX_EVIDENCE_ROUNDS + 1) {
+            if (rounds > turn.limits.maxEvidenceRounds + 1) {
                 // It was told no more rounds and asked again.
                 turn.outcome = "INCOMPLETE"
                 turn.replyParts << "I need more evidence than one message allows; tell me which finding or record to look at."
@@ -478,8 +473,8 @@ class AgentOrchestrator {
             }
             String content
             boolean isError = false
-            if (rounds > MAX_EVIDENCE_ROUNDS) {
-                content = "NO_MORE_EVIDENCE: ${MAX_EVIDENCE_ROUNDS} rounds used; write with what you have, or ask the person.".toString()
+            if (rounds > turn.limits.maxEvidenceRounds) {
+                content = "NO_MORE_EVIDENCE: ${turn.limits.maxEvidenceRounds} rounds used; write with what you have, or ask the person.".toString()
                 isError = true
             } else {
                 Map found = investigate(turn, items, ((Map) r.control.input).need as String, (List<Map>) (evidence?.facts ?: []))
@@ -539,13 +534,13 @@ class AgentOrchestrator {
     // ---------------------------------------------------------------- one role run
 
     /**
-     * Starts the role's turn row, runs it within what is left of the 240 s, records its messages and what it made. Ends
+     * Starts the role's turn row, runs it within what is left of the turn's time, records its messages and what it made. Ends
      * the whole turn (Stop) on a tenant switch, Claude being unavailable, the daily cap, or too little time left.
      */
     private RoleResult role(Turn turn, RoleSpec base, List<MessageParam> messages) {
         long left = turn.deadline - clock.call()
         if (left < MIN_ROLE_MS) throw new Stop("INCOMPLETE", "I ran out of time for this message; ask again for the rest.")
-        if (overDailyCap(turn.ec, turn.pinned)) throw new Stop("OVER_BUDGET", "The agent's budget for this tenant is spent for today (UTC).")
+        if (overDailyCap(turn.ec, turn.pinned, turn.cfg, turn.limits)) throw new Stop("OVER_BUDGET", "The agent's budget for this tenant is spent for today (UTC).")
         // The grant is read again before every role: one that reached its limit, was paused or revoked mid-turn stops the next role.
         Map access = AgentAccess.access(turn.ec, turn.pinned, turn.userId)
         if (access.state != AgentAccess.LIVE) throw new Stop(accessOutcome(access), accessReply(access))
@@ -712,13 +707,16 @@ class AgentOrchestrator {
                 .condition("startedDate", EntityCondition.GREATER_THAN_EQUAL_TO, since).useCache(false).count()
     }
 
-    static int turnsPerHour() { return DarpanSettings.intValue(AgentLimits.TURNS_PER_USER_PER_HOUR) }
+    /**
+     * The one read of the daily cap: the tenant's override in cfg, else the global setting in lim (DAR-BE-304's key). A turn
+     * passes its own cfg and lim, so every role is compared against one cap.
+     */
+    static BigDecimal dailyCapUsd(String tenantId, AgentConfig cfg, AgentLimits lim) {
+        return cfg.tenantCap(tenantId) ?: lim.dailyUsdCapPerTenant
+    }
 
-    /** The one read of the global daily cap (DAR-BE-307 wraps this for a per-tenant override). */
-    static BigDecimal dailyCapUsd() { return DarpanSettings.decimalValue(AgentLimits.DAILY_USD_CAP_PER_TENANT) }
-
-    static boolean overDailyCap(def ec, String pinned) {
-        return AgentUsageLedger.todayCostMicros(ec, pinned) >= (dailyCapUsd() * 1_000_000G).longValue()
+    static boolean overDailyCap(def ec, String pinned, AgentConfig cfg, AgentLimits lim) {
+        return AgentUsageLedger.todayCostMicros(ec, pinned) >= (dailyCapUsd(pinned, cfg, lim) * 1_000_000G).longValue()
     }
 
     // ---------------------------------------------------------------- rows
@@ -829,17 +827,17 @@ class AgentOrchestrator {
          * null otherwise (facts about another finding are not this one's). Typed again on the way out (typedEvidence), so
          * a stored row never reaches the author unfiltered.
          */
-        List<Map> lastFacts(String findingId) {
+        List<Map> lastFacts(String findingId, AgentLimits lim) {
             // DAR-BE-224: approvals, rejects and reverts write plain-text OPERATOR notes too; only a turn's own record (a Map)
             // counts toward the earlier turns looked at, so a run of notes cannot push the facts out of reach.
             int turnsSeen = 0
             for (def msg : rows().condition("kind", "OPERATOR").orderBy(NEWEST_FIRST).limit(OPERATOR_ROWS_READ).list()) {
                 Object parsed = AgentOrchestrator.parseJson(msg.contentJson as String)
                 if (!(parsed instanceof Map)) continue
-                if (++turnsSeen > AgentOrchestrator.EARLIER_TURNS) return null
+                if (++turnsSeen > lim.earlierTurns) return null
                 if (!(((Map) parsed).facts instanceof List)) continue
                 if (((Map) parsed).findingId != findingId) return null
-                List<Map> facts = (List<Map>) AgentOrchestrator.typedEvidence([facts: ((Map) parsed).facts])?.facts
+                List<Map> facts = (List<Map>) AgentOrchestrator.typedEvidence([facts: ((Map) parsed).facts], lim)?.facts
                 return facts ?: null
             }
             return null
@@ -907,6 +905,9 @@ class AgentOrchestrator {
     /** One message's state while its roles run. */
     static class Turn {
         def ec
+        /** The turn's one config and limits snapshot (DAR-BE-307); every role and check of the turn reads these. */
+        AgentConfig cfg
+        AgentLimits limits
         String pinned
         /** The person and the AI access grant this turn spends against (DAR-BE-194). */
         String userId

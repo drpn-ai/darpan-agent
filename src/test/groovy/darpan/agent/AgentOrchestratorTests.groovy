@@ -3,6 +3,9 @@ package darpan.agent
 import com.anthropic.models.messages.Message
 import com.anthropic.models.messages.MessageParam
 import darpan.agent.loop.AgentRoleLoop
+import darpan.agent.config.AgentConfig
+import darpan.agent.config.AgentConfigTestSupport
+import darpan.agent.config.AgentLimits
 import darpan.agent.loop.AgentRoleLoopTests
 import darpan.agent.loop.RoleResult
 import darpan.agent.loop.RoleSpec
@@ -143,7 +146,8 @@ class AgentOrchestratorTests {
 
     @AfterAll
     void cleanup() {
-        System.clearProperty(darpan.agent.loop.RoleSpec.ESCALATION_MODEL_PROPERTY)
+        AgentConfigTestSupport.clear(ec)
+        AgentConfigTestSupport.clearSettings()
         if (previousEnabled == null) System.clearProperty(AgentSwitch.ENABLED_PROPERTY) else System.setProperty(AgentSwitch.ENABLED_PROPERTY, previousEnabled)
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
@@ -151,7 +155,9 @@ class AgentOrchestratorTests {
     @BeforeEach
     void reset() {
         // Scripts here script one author; escalation (a second author on a doubtful turn) has its own test.
-        System.setProperty(darpan.agent.loop.RoleSpec.ESCALATION_MODEL_PROPERTY, "none")
+        AgentConfigTestSupport.clearSettings()
+        AgentConfigTestSupport.clear(ec)
+        AgentConfigTestSupport.set(ec, [AgentRoleConfig: [[roleId: "AUTHOR_ESCALATION", modelId: "none"]]])
         asSystem {
             AGENT_ENTITIES.each { ec.entity.find(it).deleteAll() }
             GRANT_ENTITIES.each { ec.entity.find(it).deleteAll() }
@@ -347,7 +353,7 @@ class AgentOrchestratorTests {
 
     @Test
     void "an author that would ask the person is rerun on the escalation model first, and only its question goes out"() {
-        System.setProperty(darpan.agent.loop.RoleSpec.ESCALATION_MODEL_PROPERTY, "claude-opus-5-5")
+        AgentConfigTestSupport.clear(ec)   // the shipped escalation model (Opus) is back
         String words = "A claim made twice on one product is its own cause, not memo left open. Add that cause."
         Closure<List<Object>> script = { List<Object> opusSays ->
             [router([item("RULE_NEW", words)]),
@@ -987,6 +993,93 @@ class AgentOrchestratorTests {
         assertTrue((out.reply as String).contains(ids[0]), out.reply as String)
         List<String> kinds = messages(out.conversationId as String)*.kind
         assertEquals("OPERATOR", kinds.last(), "the reply and outcome are still stored: ${kinds}")
+    }
+
+    // ------------------------------------------------------------------ DAR-BE-307: one snapshot per turn
+
+    @Test
+    void "a role's model, prompt and budget come from the config"() {
+        AgentConfigTestSupport.set(ec, [AgentRoleConfig: [[roleId: "ROUTER", modelId: "claude-opus-5-5"]],
+                                        AgentPrompt: [[promptId: "router", promptText: "ROUTER EDIT"]]])
+        AgentConfigTestSupport.settings(["darpan.agent.routerMaxTokens": "3000"])
+        def g = new AgentRoleLoopTests.ScriptedGateway([router([item("OTHER", "poem")])])
+        send(new AgentOrchestrator(g, AVAILABLE), "Write me a poem")
+        Map wire = AgentRoleLoopTests.wire(g.sent[0])
+        assertEquals("claude-opus-5-5", wire.model)
+        assertEquals(3000, wire.max_tokens)
+        assertTrue(JsonOutput.toJson(wire.system).contains("ROUTER EDIT"), "the edited prompt is on the wire")
+    }
+
+    @Test
+    void "one turn builds every role from one snapshot"() {
+        String words = "CM-2002 is a test memo; leave it out."
+        def g = new AgentRoleLoopTests.ScriptedGateway([
+                {
+                    // Edits made while the turn runs: a 307 row and a settings row, both expired at once.
+                    AgentConfigTestSupport.set(ec, [AgentRoleConfig: [[roleId: "AUTHOR", modelId: "claude-opus-5-5"]]])
+                    AgentConfigTestSupport.settings(["darpan.agent.authorMaxTokens": "9000"])
+                    router([item("CAUSE_FEEDBACK", words)])
+                },
+                evidence([fact("findingId", FINDING, "TOOL")]),
+                authorSays([toolUse("tu_1", "ask_human", [question: "Which memo?", options: []])])])
+        send(new AgentOrchestrator(g, AVAILABLE), words)
+        assertEquals(3, g.sent.size())
+        Map author = AgentRoleLoopTests.wire(g.sent[2])
+        assertEquals("claude-sonnet-5-5", author.model, "the author keeps the model the turn started with")
+        assertEquals(32000, author.max_tokens, "and its budget")
+        assertEquals("claude-opus-5-5", AgentConfig.current(ec).model("AUTHOR"), "the next turn would see the edit")
+        assertEquals(9000, AgentLimits.read().authorMaxTokens)
+    }
+
+    @Test
+    void "an unpriced turn role refuses the turn and sends nothing"() {
+        AgentConfigTestSupport.set(ec, [AgentRoleConfig: [[roleId: "AUTHOR", modelId: "claude-x"]]])
+        def g = new AgentRoleLoopTests.ScriptedGateway([])
+        Map out = send(new AgentOrchestrator(g, AVAILABLE), "Why is this one open?")
+        assertEquals("AGENT_REFUSED", out.outcome)
+        assertEquals(0, g.sent.size())
+        assertEquals(0L, count("darpan.agent.AgentTurn"))
+        assertTrue(AgentAvailability.pricingRefusal(AgentConfig.current(ec)))
+    }
+
+    @Test
+    void "the daily cap uses the tenant override, else the global"() {
+        asSystem {
+            upsert("darpan.agent.AgentConversation", [conversationId: "AGO_SPENT", companyUserGroupId: MINE, userId: "SOMEONE_ELSE", createdDate: ec.user.nowTimestamp])
+            upsert("darpan.agent.AgentTurn", [turnId: "AGO_SPENT_T", conversationId: "AGO_SPENT", companyUserGroupId: MINE, role: "AUTHOR",
+                    costMicros: 20_000L, startedDate: ec.user.nowTimestamp])
+        }
+        AgentConfigTestSupport.set(ec, [AgentTenantCap: [[tenantUserGroupId: MINE, dailyUsdCap: 0.01]]])
+        AgentConfig cfg = AgentConfig.current(ec)
+        AgentLimits lim = AgentLimits.read()
+        assertEquals(0, new BigDecimal("0.01").compareTo(AgentOrchestrator.dailyCapUsd(MINE, cfg, lim)))
+        assertEquals(0, lim.dailyUsdCapPerTenant.compareTo(AgentOrchestrator.dailyCapUsd(OTHER, cfg, lim)), "no override: the global cap")
+        def g = new AgentRoleLoopTests.ScriptedGateway([])
+        assertEquals("OVER_BUDGET", send(new AgentOrchestrator(g, AVAILABLE), "Why is this one open?").outcome)
+        assertEquals(0, g.sent.size())
+        assertFalse(AgentOrchestrator.overDailyCap(ec, OTHER, cfg, lim), "the other tenant passes")
+    }
+
+    @Test
+    void "maxMessageChars and minConfidence come from the settings"() {
+        AgentConfigTestSupport.settings(["darpan.agent.maxMessageChars": "1000", "darpan.agent.minConfidence": "0.99"])
+        def none = new AgentRoleLoopTests.ScriptedGateway([])
+        assertNull(new AgentOrchestrator(none, AVAILABLE).send(ec, null, AUDIT, FINDING, "x" * 1001))
+        assertTrue(ec.message.errorsString.contains("1000"), ec.message.errorsString)
+        ec.message.clearAll()
+        assertEquals(0, none.sent.size())
+
+        def g = new AgentRoleLoopTests.ScriptedGateway([router([item("CAUSE_FEEDBACK", "exclude that one", 0.95)])])
+        Map out = send(new AgentOrchestrator(g, AVAILABLE), "exclude that one", null)
+        assertEquals("QUESTION", out.outcome, "0.95 is below the edited threshold")
+    }
+
+    @Test
+    void "escalation none turns escalation off"() {
+        AgentConfig cfg = AgentConfig.current(ec)   // reset() left AUTHOR_ESCALATION at none
+        assertNull(RoleSpec.escalationAuthor(cfg, AgentLimits.read()))
+        AgentConfigTestSupport.clear(ec)
+        assertEquals("claude-opus-5-5", RoleSpec.escalationAuthor(AgentConfig.current(ec), AgentLimits.read()).model)
     }
 
     @Test

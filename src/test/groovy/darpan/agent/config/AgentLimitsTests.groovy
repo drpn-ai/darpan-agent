@@ -104,7 +104,6 @@ class AgentLimitsTests {
         assertEquals(20, l.turnsPerUserPerHour)
         assertEquals(500, l.retryBackoffBaseMs)
         assertEquals(8000, l.retryBackoffMaxMs)
-        assertEquals(20, AgentOrchestrator.turnsPerHour())
     }
 
     @Test
@@ -113,9 +112,8 @@ class AgentLimitsTests {
         DarpanSettings.resetForTest()
         DarpanSettings.rowLoader = { -> [(AgentLimits.DAILY_USD_CAP_PER_TENANT): [settingValue: "5"], (AgentLimits.TURNS_PER_USER_PER_HOUR): [settingValue: "3"],
                                          (AgentLimits.MAX_ITEMS): [settingValue: "0"]] as Map<String, Map> }
-        assertEquals(0, new BigDecimal("5").compareTo(AgentOrchestrator.dailyCapUsd()))
-        assertEquals(3, AgentOrchestrator.turnsPerHour())
         AgentLimits l = AgentLimits.read()
+        assertEquals(0, new BigDecimal("5").compareTo(AgentOrchestrator.dailyCapUsd("T", AgentConfig.defaults(), l)))
         assertEquals(3, l.turnsPerUserPerHour)
         assertEquals(10, l.maxItems)
     }
@@ -137,8 +135,7 @@ class AgentLimitsTests {
         System.setProperty(AgentLimits.DAILY_USD_CAP_PER_TENANT, "7.5")
         DarpanSettings.resetForTest()
         DarpanSettings.rowLoader = { -> [:] as Map<String, Map> }
-        assertEquals(1000, AgentOrchestrator.turnsPerHour())
-        assertEquals(0, new BigDecimal("7.5").compareTo(AgentOrchestrator.dailyCapUsd()))
+        assertEquals(0, new BigDecimal("7.5").compareTo(AgentOrchestrator.dailyCapUsd("T", AgentConfig.defaults(), AgentLimits.read())))
         assertEquals(1000, AgentLimits.read().turnsPerUserPerHour)
     }
 

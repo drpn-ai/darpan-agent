@@ -39,9 +39,9 @@ class AgentEvalRunnerTests {
     void setup() {
         PROPERTIES.each { previous[it] = System.getProperty(it) }
         AgentEvalRunner.configureAgent(AgentEvalRunner.DEFAULT_BUDGET_USD)
-        // The harness scripts one author per turn; escalation is the orchestrator's (AgentOrchestratorTests).
-        System.setProperty(darpan.agent.loop.RoleSpec.ESCALATION_MODEL_PROPERTY, "none")
         ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "agent-eval-selftest")
+        // The harness scripts one author per turn; escalation is the orchestrator's (AgentOrchestratorTests).
+        darpan.agent.config.AgentConfigTestSupport.set(ec, [AgentRoleConfig: [[roleId: "AUTHOR_ESCALATION", modelId: "none"]]])
         File evalDir = new File(System.getProperty(AgentEvalRunner.DIR_PROPERTY) ?: "src/evals").absoluteFile
         cases = AgentEvalRunner.loadCases(evalDir)
         runner = new AgentEvalRunner(ec, evalDir)
@@ -51,7 +51,7 @@ class AgentEvalRunnerTests {
     @AfterAll
     void cleanup() {
         PROPERTIES.each { String p -> previous[p] == null ? System.clearProperty(p) : System.setProperty(p, previous[p]) }
-        System.clearProperty(darpan.agent.loop.RoleSpec.ESCALATION_MODEL_PROPERTY)
+        darpan.agent.config.AgentConfigTestSupport.clear(ec)
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 

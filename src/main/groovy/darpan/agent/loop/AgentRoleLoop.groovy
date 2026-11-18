@@ -24,6 +24,7 @@ import com.anthropic.models.messages.ToolResultBlockParam
 import com.anthropic.models.messages.ToolUnion
 import com.anthropic.models.messages.ToolUseBlock
 import com.anthropic.core.ObjectMappers
+import darpan.agent.config.AgentLimits
 import darpan.agent.claude.ModelGateway
 import darpan.agent.claude.ModelUnavailableException
 import darpan.agent.claude.StreamInterruptedException
@@ -33,7 +34,6 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 import java.time.Duration
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * DAR-BE-159. The Messages API tool loop one role runs: send, append the response whole, run its tool calls as the user,
@@ -45,9 +45,9 @@ import java.util.concurrent.ConcurrentHashMap
  * Every request is priced onto the turn's AgentTurn row, under the pinned tenant.
  *
  * wallClockMs is checked between steps: before each request and before each tool. The orchestrator gives a role at most
- * what is left of the turn's 240 s, so this is also the turn cap. Each attempt's timeout is all that is left (it bounds
+ * what is left of the turn's wall-clock cap (turnWallClockMs), so this is also the turn cap. Each attempt's timeout is all that is left (it bounds
  * the whole call, streamed body included), so a long streamed answer keeps the role's time. The SDK does not retry; this
- * loop retries a request at most {@link #MAX_RETRIES} times, only for a failure before any streamed byte (a connection
+ * loop retries a request at most the requestMaxRetries setting times, only for a failure before any streamed byte (a connection
  * error, 429, 5xx, 529), after its Retry-After or a backoff, and only when at least {@link #MIN_REQUEST_TIMEOUT_MS} is
  * still left after the wait. A stream that fails after it started is never retried; the usage it reported is recorded.
  */
@@ -75,13 +75,6 @@ class AgentRoleLoop {
      */
     static final String REPEAT_NOTICE = "You are repeating a read you already have, so no more tool calls will run. Return the evidence JSON now from what you have read, and say in it what you could not see."
     static final String LAST_REQUEST_NOTICE = "This is your last request: no tool you call now will run. Return the evidence JSON now from what you have read, and say in it what you could not check."
-    /** Retries of one request, each only before any streamed byte and inside the deadline. */
-    static final int MAX_RETRIES = 2
-    static final long BACKOFF_BASE_MS = 500L
-    static final long BACKOFF_MAX_MS = 8_000L
-
-    private static final Map<String, String> PROMPTS = new ConcurrentHashMap<>()
-
     static RoleResult run(def ec, RoleSpec spec, String pinnedTenantId, List<MessageParam> messages, ModelGateway gateway, String turnId) {
         return new AgentRoleLoop().runRole(ec, spec, pinnedTenantId, messages, gateway, turnId)
     }
@@ -94,19 +87,20 @@ class AgentRoleLoop {
 
     /**
      * One request with this loop's own retries: each attempt is given all that is left before the deadline; a failure before
-     * any streamed byte that may pass (connection error, 429, 5xx, 529) is retried after its Retry-After (or 0.5 s x 2^n,
-     * at most 8 s), at most MAX_RETRIES times, and only while MIN_REQUEST_TIMEOUT_MS is still left after the wait.
+     * any streamed byte that may pass (connection error, 429, 5xx, 529) is retried after its Retry-After (or retryBackoffBaseMs x 2^n,
+     * capped by retryBackoffMaxMs), at most requestMaxRetries times, and only while MIN_REQUEST_TIMEOUT_MS is still left after the wait.
      * Anything else is thrown as it came, including StreamInterruptedException.
      */
-    protected Message sendWithRetries(ModelGateway gateway, MessageCreateParams params, long deadline) {
+    protected Message sendWithRetries(RoleSpec spec, ModelGateway gateway, MessageCreateParams params, long deadline) {
+        AgentLimits limits = spec.limits
         int retries = 0
         while (true) {
             try {
                 return gateway.send(params, Duration.ofMillis(Math.max(1L, deadline - now())))
             } catch (RuntimeException e) {
-                if (!retryable(e) || retries >= MAX_RETRIES) throw e
+                if (!retryable(e) || retries >= limits.requestMaxRetries) throw e
                 Long after = retryAfterMs(e)
-                long wait = after != null ? after : Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * (1L << retries))
+                long wait = after != null ? after : Math.min((long) limits.retryBackoffMaxMs, limits.retryBackoffBaseMs * (1L << retries))
                 if (deadline - now() - wait < MIN_REQUEST_TIMEOUT_MS) throw e
                 logger.info("Claude request failed before streaming (${e.class.simpleName}); retry ${retries + 1} in ${wait} ms".toString())
                 pause(wait)
@@ -164,12 +158,12 @@ class AgentRoleLoop {
 
             Message response
             try {
-                response = sendWithRetries(gateway, buildParams(spec, result.messages, forceText, result.requestCount + 1 >= spec.maxRequests), deadline)
+                response = sendWithRetries(spec, gateway, buildParams(spec, result.messages, forceText, result.requestCount + 1 >= spec.maxRequests), deadline)
             } catch (StreamInterruptedException e) {
                 // Billed: the stream had started. What it reported counts toward the turn and the tenant's daily cap.
                 if (e.usage != null) {
                     result.requestCount++
-                    AgentUsageLedger.record(ec, pinnedTenantId, turnId, e.usage, e.model ?: spec.model)
+                    AgentUsageLedger.record(ec, pinnedTenantId, turnId, e.usage, e.model ?: spec.model, spec.config)
                 }
                 return unavailable(ec, pinnedTenantId, turnId, result, e)
             } catch (RateLimitException | UnauthorizedException | PermissionDeniedException | SseException e) {
@@ -185,7 +179,7 @@ class AgentRoleLoop {
             result.requestCount++
             result.finalMessage = response
             result.stopReason = response.stopReason().map { it.asString() }.orElse(null)
-            AgentUsageLedger.record(ec, pinnedTenantId, turnId, response.usage(), response.model().asString() ?: spec.model)
+            AgentUsageLedger.record(ec, pinnedTenantId, turnId, response.usage(), response.model().asString() ?: spec.model, spec.config)
 
             StopReason stop = response.stopReason().orElse(null)
             if (stop == StopReason.TOOL_USE) {
@@ -290,7 +284,7 @@ class AgentRoleLoop {
         MessageCreateParams.Builder b = MessageCreateParams.builder()
                 .model(spec.model)
                 .maxTokens(spec.maxTokens)
-                .systemOfTextBlockParams([TextBlockParam.builder().text(systemPrompt(spec.systemPromptPath))
+                .systemOfTextBlockParams([TextBlockParam.builder().text(spec.systemPrompt)
                         .cacheControl(CacheControlEphemeral.builder().build()).build()])
                 .messages(messages)
         if (spec.tools) b.tools(AgentToolExecutor.toolDefinitions(spec.tools).collect { ToolUnion.ofTool(it) })
@@ -312,14 +306,6 @@ class AgentRoleLoop {
     }
 
     static boolean fallbacksOn() { return System.getProperty(FALLBACKS_PROPERTY)?.trim()?.toLowerCase(Locale.ROOT) != "false" }
-
-    static String systemPrompt(String path) {
-        return PROMPTS.computeIfAbsent(path) { String p ->
-            InputStream stream = AgentRoleLoop.class.classLoader.getResourceAsStream(p)
-            if (stream == null) throw new IllegalStateException("Agent prompt ${p} is missing".toString())
-            try { return stream.getText("UTF-8") } finally { stream.close() }
-        }
-    }
 
     private static boolean tenantStill(def ec, String pinnedTenantId) {
         return pinnedTenantId && TenantAccessSupport.currentActiveTenantUserGroupId(ec) == pinnedTenantId

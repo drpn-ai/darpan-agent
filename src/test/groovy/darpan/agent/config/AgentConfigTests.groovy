@@ -106,8 +106,8 @@ class AgentConfigTests {
     @DisplayName("the tenant override is valid only inside the global cap's range")
     void tenantOverrideRange() {
         AgentConfigTestSupport.set(ec, [AgentTenantCap: [
-                [companyUserGroupId: "T_FIVE", dailyUsdCap: 5], [companyUserGroupId: "T_ZERO", dailyUsdCap: 0],
-                [companyUserGroupId: "T_BIG", dailyUsdCap: 5000]]])
+                [tenantUserGroupId: "T_FIVE", dailyUsdCap: 5], [tenantUserGroupId: "T_ZERO", dailyUsdCap: 0],
+                [tenantUserGroupId: "T_BIG", dailyUsdCap: 5000]]])
         AgentConfig c = AgentConfig.current(ec)
         assertDec(5, c.tenantCap("T_FIVE"))
         assertNull(c.tenantCap("T_ZERO"))

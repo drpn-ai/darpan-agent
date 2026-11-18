@@ -3,6 +3,8 @@ package darpan.agent
 import com.anthropic.errors.AnthropicServiceException
 import com.anthropic.models.messages.MessageParam
 import darpan.agent.claude.ModelGateway
+import darpan.agent.config.AgentConfig
+import darpan.agent.config.AgentLimits
 import darpan.agent.loop.AgentRoleLoop
 import darpan.agent.loop.RoleSpec
 import org.slf4j.Logger
@@ -24,27 +26,45 @@ class AgentPreflight {
     static final String PING = "Preflight check: reply with the word OK and nothing else."
 
     /** The request shapes a turn sends: router, investigator, author, ticket-only author, and the escalation author when on. */
-    static List<RoleSpec> specs() {
-        List<RoleSpec> out = [RoleSpec.router(AgentOrchestrator.ROUTER_SCHEMA), RoleSpec.investigator().copy(outputSchema: AgentOrchestrator.EVIDENCE_SCHEMA),
-                              RoleSpec.author(), RoleSpec.author().copy(tools: ["raise_ticket"])]
-        RoleSpec stronger = RoleSpec.escalationAuthor()
+    static List<RoleSpec> specs(AgentConfig cfg) {
+        AgentLimits lim = AgentLimits.read()
+        List<RoleSpec> out = [RoleSpec.router(AgentOrchestrator.ROUTER_SCHEMA, cfg, lim), RoleSpec.investigator(cfg, lim).copy(outputSchema: AgentOrchestrator.EVIDENCE_SCHEMA),
+                              RoleSpec.author(cfg, lim), RoleSpec.author(cfg, lim).copy(tools: ["raise_ticket"])]
+        RoleSpec stronger = RoleSpec.escalationAuthor(cfg, lim)
         if (stronger != null) out << stronger
         return out
     }
 
-    /** "accepted", or the refusal, once known; null until then. */
-    private static volatile String known = null
+    /** What the models were when the answer was learned: each spec's role=model. A different one asks again. */
+    private static String fingerprint(List<RoleSpec> specs) { return specs.collect { "${it.role}=${it.model}".toString() }.join(",") }
 
-    /** Null when every shape is accepted (or the API could not be asked just now); "ROLE: message" when one is refused. */
-    static synchronized String refusal(ModelGateway gateway) {
-        if (known != null) return known == ACCEPTED ? null : known
-        for (RoleSpec spec : specs()) {
+    /** "accepted", or the refusal, once known for the models in knownFingerprint; null until then. */
+    private static volatile String known = null
+    private static volatile String knownFingerprint = null
+
+    /** Null when every shape is accepted (or the API could not be asked just now); "ROLE model: message" when one is refused. */
+    static String refusal(ModelGateway gateway) { return refusal(gateway, AgentConfig.current(null)) }
+
+    /**
+     * The same, for the turn roles' models in cfg. The specs (which read the settings) are built before the lock is taken, so
+     * no config or settings read ever happens while it is held.
+     */
+    static String refusal(ModelGateway gateway, AgentConfig cfg) {
+        List<RoleSpec> specs = specs(cfg)
+        return check(gateway, specs, fingerprint(specs))
+    }
+
+    private static synchronized String check(ModelGateway gateway, List<RoleSpec> specs, String fingerprint) {
+        if (known != null && knownFingerprint == fingerprint) return known == ACCEPTED ? null : known
+        known = null
+        for (RoleSpec spec : specs) {
             try {
                 gateway.send(AgentRoleLoop.buildParams(spec.copy(maxTokens: MAX_TOKENS), [MessageParam.ofUser(PING)]))
             } catch (AnthropicServiceException e) {
                 int status = e.statusCode()
                 if (status >= 400 && status < 500 && status != 429) {
                     known = "${spec.role} ${spec.model}: ${e.message}".toString()
+                    knownFingerprint = fingerprint
                     logger.error("Agent request shape refused by the Claude API, the agent is off until it is fixed: {}", known)
                     return known
                 }
@@ -56,11 +76,12 @@ class AgentPreflight {
             }
         }
         known = ACCEPTED
+        knownFingerprint = fingerprint
         return null
     }
 
     private static final String ACCEPTED = "accepted"
 
     /** Tests only: forget what was learned, so the next call asks again. */
-    static synchronized void reset() { known = null }
+    static synchronized void reset() { known = null; knownFingerprint = null }
 }

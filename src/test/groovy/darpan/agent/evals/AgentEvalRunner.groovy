@@ -660,7 +660,7 @@ class AgentEvalRunner {
     /**
      * One case sent to a {@link RecordingGateway} (no network): every request the loop would send is captured, then priced
      * as if each of the cases ran RUNS times: input tokens = the request's serialized characters / 3.5, output tokens =
-     * 0.25 x its max_tokens, at AgentUsageLedger.PRICES (no cache discount). The dry turn's rows record zero tokens, so it
+     * 0.25 x its max_tokens, at the config's model prices (no cache discount). The dry turn's rows record zero tokens, so it
      * costs nothing against the budget.
      */
     Map estimate(Map c, int caseCount, int runs) {
@@ -678,8 +678,9 @@ class AgentEvalRunner {
         List<Map> priced = requests.collect { Map r ->
             long inTokens = ((r.chars as BigDecimal) / CHARS_PER_TOKEN).setScale(0, RoundingMode.CEILING).longValue()
             long outTokens = ((r.maxTokens as BigDecimal) * OUTPUT_SHARE_OF_MAX_TOKENS).setScale(0, RoundingMode.CEILING).longValue()
-            List<BigDecimal> p = AgentUsageLedger.PRICES[r.model as String] ?: AgentUsageLedger.PRICES["claude-opus-5-5"]
-            long micros = ((p[0] * inTokens) + (p[1] * outTokens)).setScale(0, RoundingMode.HALF_UP).longValueExact()
+            darpan.agent.config.AgentConfig cfg = darpan.agent.config.AgentConfig.current(null)
+            darpan.agent.config.ModelPrice p = cfg.price(r.model as String) ?: cfg.dearest()
+            long micros = ((p.input * inTokens) + (p.output * outTokens)).setScale(0, RoundingMode.HALF_UP).longValueExact()
             [model: r.model, chars: r.chars, maxTokens: r.maxTokens, inputTokens: inTokens, outputTokens: outTokens, costMicros: micros] as Map
         }
         long perCase = priced.sum(0L) { it.costMicros as long } as long
@@ -689,7 +690,7 @@ class AgentEvalRunner {
                 assumptions: ["one dry case (${caseId}) sent to a recording gateway: ${priced.size()} requests captured, none sent".toString(),
                               "input tokens = serialized request characters / ${CHARS_PER_TOKEN} (conservative), no cache-read discount".toString(),
                               "output tokens = ${OUTPUT_SHARE_OF_MAX_TOKENS} x each request's max_tokens".toString(),
-                              "priced at AgentUsageLedger.PRICES per model (dollars per million tokens)",
+                              "priced at the agent config's model prices (the dearest for an unpriced model) (dollars per million tokens)",
                               "every case costed like the dry case, x ${caseCount} cases x ${runs} runs".toString(),
                               "a real investigator may use more rounds than the dry case's two (up to 12), so this is upper-ish, not a ceiling"]]
     }

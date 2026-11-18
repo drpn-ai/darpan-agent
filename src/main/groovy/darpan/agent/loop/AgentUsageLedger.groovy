@@ -1,6 +1,8 @@
 package darpan.agent.loop
 
 import com.anthropic.models.messages.Usage
+import darpan.agent.config.AgentConfig
+import darpan.agent.config.ModelPrice
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import org.moqui.entity.EntityCondition
@@ -24,17 +26,6 @@ class AgentUsageLedger {
     private static final String CONVERSATION = "darpan.agent.AgentConversation"
     /** The turn is the pinned tenant's, compared on the row: the active tenant may have changed in another tab. */
     private static final String WHY = "agent usage: pinned tenant compared on the row"
-
-    /**
-     * Dollars per million tokens: input, output, cache read. Dollars per MTok equal micro-dollars per token. A cache write
-     * (5-minute) is priced at 1.25 x input, the API's rate. A model not listed (a fallback model) is priced as Opus, the
-     * dearest, so the daily cap never under-counts.
-     */
-    static final Map<String, List<BigDecimal>> PRICES = [
-            "claude-opus-5-5"  : [4.0G, 20.0G, 0.20G],
-            "claude-sonnet-5-5": [2.0G, 10.0G, 0.20G],
-            "claude-haiku-5-5" : [0.10G, 0.50G, 0.01G]].asImmutable()
-    static final BigDecimal CACHE_WRITE_FACTOR = 1.25G
 
     /**
      * A new AgentTurn for one role run of the pinned tenant, naming the person and the AI access grant it spends against
@@ -71,8 +62,8 @@ class AgentUsageLedger {
     /** Pauses a grant that reached its limit (AgentAccess.pauseIfOverLimit); tests replace it to make the pause fail. */
     static Closure<Boolean> pauser = { def e, String grantId -> darpan.agent.AgentAccess.pauseIfOverLimit(e, grantId) }
 
-    static long record(def ec, String pinnedTenantId, String turnId, Usage usage, String model) {
-        long cost = costMicros(model, usage)
+    static long record(def ec, String pinnedTenantId, String turnId, Usage usage, String model, AgentConfig cfg = AgentConfig.current(ec)) {
+        long cost = costMicros(model, usage, cfg)
         String grantId = null
         ec.transaction.runRequireNew(null, "Could not record agent usage") {
             def row = owned(ec, turnId, pinnedTenantId)
@@ -110,13 +101,21 @@ class AgentUsageLedger {
         }
     }
 
-    /** Micro-dollars one request cost: uncached input, cache writes, output and cache reads at the model's prices. */
-    static long costMicros(String model, Usage usage) {
-        List<BigDecimal> p = PRICES[model] ?: PRICES["claude-opus-5-5"]
-        BigDecimal total = (p[0] * usage.inputTokens()) +
-                (p[0] * CACHE_WRITE_FACTOR * usage.cacheCreationInputTokens().orElse(0L)) +
-                (p[1] * usage.outputTokens()) +
-                (p[2] * usage.cacheReadInputTokens().orElse(0L))
+    /**
+     * Micro-dollars one request cost: uncached input, cache writes, output and cache reads at the model's prices (cfg: the turn's
+     * snapshot). A model with no price (a server-side fallback answered) is charged at the dearest price in cfg, never zero, so
+     * the daily cap cannot under-count; that is logged.
+     */
+    static long costMicros(String model, Usage usage, AgentConfig cfg = AgentConfig.current(null)) {
+        ModelPrice p = cfg.price(model)
+        if (p == null) {
+            logger.warn("Model {} has no price; charged at the dearest", model)
+            p = cfg.dearest()
+        }
+        BigDecimal total = (p.input * usage.inputTokens()) +
+                (p.cacheWrite * usage.cacheCreationInputTokens().orElse(0L)) +
+                (p.output * usage.outputTokens()) +
+                (p.cacheRead * usage.cacheReadInputTokens().orElse(0L))
         return total.setScale(0, RoundingMode.HALF_UP).longValueExact()
     }
 

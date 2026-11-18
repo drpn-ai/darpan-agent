@@ -9,6 +9,7 @@ import com.anthropic.models.messages.StopReason
 import com.anthropic.models.messages.TextBlockParam
 import darpan.agent.claude.AnthropicModelGateway
 import darpan.agent.claude.ModelGateway
+import darpan.agent.config.AgentConfig
 import darpan.agent.loop.AgentRoleLoop
 import darpan.agent.loop.AgentUsageLedger
 import darpan.facade.common.TenantScopedFinder
@@ -98,7 +99,7 @@ class AuditRunWriter {
         return MessageCreateParams.builder()
                 .model(MODEL)
                 .maxTokens(MAX_TOKENS)
-                .systemOfTextBlockParams([TextBlockParam.builder().text(AgentRoleLoop.systemPrompt(PROMPT))
+                .systemOfTextBlockParams([TextBlockParam.builder().text(AgentConfig.current(null).promptForPath(PROMPT))
                         .cacheControl(CacheControlEphemeral.builder().build()).build()])
                 .addUserMessage("<facts>\n" + JsonOutput.toJson(facts) + "\n</facts>")
                 .outputConfig(ObjectMappers.jsonMapper().convertValue(output, OutputConfig))

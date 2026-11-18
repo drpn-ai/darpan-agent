@@ -1,8 +1,11 @@
 package darpan.agent.loop
 
+import darpan.agent.config.AgentConfig
+import darpan.agent.config.AgentLimits
 import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -57,22 +60,18 @@ class AgentToolSchemaLimitTests {
     }
 
     @Test
-    void "the author's model follows its system property, and only a model the ledger prices is taken"() {
-        String was = System.getProperty(RoleSpec.AUTHOR_MODEL_PROPERTY)
-        try {
-            System.clearProperty(RoleSpec.AUTHOR_MODEL_PROPERTY)
-            assertEquals("claude-sonnet-5-5", RoleSpec.author().model)
-            System.setProperty(RoleSpec.AUTHOR_MODEL_PROPERTY, " claude-sonnet-5-5 ")
-            RoleSpec sonnet = RoleSpec.author()
-            assertEquals("claude-sonnet-5-5", sonnet.model)
-            assertTrue(sonnet.adaptiveThinking(), "a Sonnet author still thinks")
-            assertEquals("HIGH", sonnet.effort)
-            System.setProperty(RoleSpec.AUTHOR_MODEL_PROPERTY, "claude-unknown-9")
-            Exception e = assertThrows(IllegalArgumentException) { RoleSpec.author() }
-            assertTrue(e.message.contains("claude-unknown-9"), e.message)
-        } finally {
-            if (was == null) System.clearProperty(RoleSpec.AUTHOR_MODEL_PROPERTY) else System.setProperty(RoleSpec.AUTHOR_MODEL_PROPERTY, was)
+    void "the author's model follows the config, and escalation is off for none or the author's own model"() {
+        assertEquals("claude-sonnet-5-5", RoleSpec.author().model)
+        AgentConfig opus = AgentConfig.defaults().with(models: [AUTHOR: "claude-opus-5-5"])
+        AgentConfig.withConfig(opus) {
+            RoleSpec author = RoleSpec.author()
+            assertEquals("claude-opus-5-5", author.model)
+            assertTrue(author.adaptiveThinking(), "an Opus author thinks")
+            assertEquals("HIGH", author.effort)
+            assertNull(RoleSpec.escalationAuthor(), "the same model as the author")
         }
+        assertEquals("claude-opus-5-5", RoleSpec.escalationAuthor().model)
+        assertNull(RoleSpec.escalationAuthor(AgentConfig.defaults().with(models: [AUTHOR_ESCALATION: "none"]), AgentLimits.read()))
     }
 
     @Test

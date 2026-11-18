@@ -46,9 +46,10 @@
 
     <entity entity-name="AgentTenantCap" package="darpan.agent" use="configuration" cache="never">
         <description>One tenant's daily dollar cap, overriding the setting darpan.agent.dailyUsdCapPerTenant. Keyed by tenant, so it is
-            not a DarpanSetting row. It carries no DARPAN_ACTIVE_COMPANY_SCOPE filter: AgentConfig loads every row and answers by an
-            explicit companyUserGroupId.</description>
-        <field name="companyUserGroupId" type="id" is-pk="true"/>
+            not a DarpanSetting row. Keyed by tenantUserGroupId, not companyUserGroupId (the DARPAN_ACTIVE_COMPANY_SCOPE
+            filter's column), like darpan.retention.TenantRetentionPeriod: super-admin instance config that AgentConfig loads whole and answers by an
+            explicit tenant id.</description>
+        <field name="tenantUserGroupId" type="id" is-pk="true"/>
         <field name="dailyUsdCap" type="number-decimal" not-null="true"/>
         <field name="lastChangedByUserId" type="id"/>
         <field name="lastChangedDate" type="date-time"/>

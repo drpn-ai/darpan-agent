@@ -12,6 +12,8 @@ import com.anthropic.models.messages.MessageParam
 import com.anthropic.models.messages.Usage
 import darpan.agent.AgentCallMarker
 import darpan.agent.claude.ModelGateway
+import darpan.agent.config.AgentConfig
+import darpan.agent.config.AgentConfigTestSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
@@ -530,6 +532,28 @@ class AgentRoleLoopTests {
         assertEquals(11000L, AgentUsageLedger.costMicros("claude-opus-5-5", u))
         assertEquals(6000L, AgentUsageLedger.costMicros("claude-sonnet-5-5", u))
         assertEquals(300L, AgentUsageLedger.costMicros("claude-haiku-5-5", u))
+    }
+
+    @Test
+    void "an unpriced response model is charged at the dearest price, never zero"() {
+        Usage u = MAPPER.readValue(JsonOutput.toJson([input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: 400, cache_read_input_tokens: 5000]), Usage)
+        assertEquals(11000L, AgentUsageLedger.costMicros("claude-next-9", u))
+        assertEquals(11000L, AgentUsageLedger.costMicros(null, u))
+    }
+
+    @Test
+    void "retries follow the settings"() {
+        AgentConfigTestSupport.settings(["darpan.agent.requestMaxRetries": "0"])
+        try {
+            def loop = new CountingLoop()
+            def gateway = new ScriptedGateway([errors.status(529), msg("end_turn", [text("never sent")])])
+            RoleResult r = run(investigator(), gateway, loop)
+            assertEquals("UNAVAILABLE", r.outcome)
+            assertEquals(1, gateway.sent.size(), "no retry")
+            assertEquals([], loop.pauses)
+        } finally {
+            AgentConfigTestSupport.clearSettings()
+        }
     }
 
     // ------------------------------------------------------------------ DAR-BE-194: the grant inside a role
