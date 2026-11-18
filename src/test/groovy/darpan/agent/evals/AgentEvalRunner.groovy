@@ -844,7 +844,7 @@ class AgentEvalRunner {
         String v = System.getProperty(BUDGET_PROPERTY)?.trim()
         if (!v) return DEFAULT_BUDGET_USD
         BigDecimal b = new BigDecimal(v)
-        if (b <= 0) throw new IllegalArgumentException("agentEvalBudgetUsd must be more than 0")
+        if (b < 0.01G || b > 1000G) throw new IllegalArgumentException("agentEvalBudgetUsd must be between 0.01 and 1000 (the settings catalog range for the daily cap); got " + v)
         return b
     }
 

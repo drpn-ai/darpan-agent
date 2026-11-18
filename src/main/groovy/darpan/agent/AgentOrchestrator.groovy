@@ -1,6 +1,5 @@
 package darpan.agent
 
-import darpan.config.DarpanSettings
 import com.anthropic.models.messages.CacheControlEphemeral
 import com.anthropic.models.messages.ContentBlockParam
 import com.anthropic.models.messages.MessageParam
@@ -14,6 +13,7 @@ import darpan.agent.loop.AgentUsageLedger
 import darpan.agent.loop.RoleResult
 import darpan.agent.loop.RoleSpec
 import darpan.agent.loop.TenantChangedException
+import darpan.config.DarpanSettings
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import groovy.json.JsonOutput
@@ -159,8 +159,9 @@ class AgentOrchestrator {
         // DAR-BE-194: the person needs a live grant of AI access in this tenant (a Darpan admin gives it); nothing is written otherwise.
         Map access = AgentAccess.access(ec, pinned, userId)
         if (access.state != AgentAccess.LIVE) return response(conversationId, accessOutcome(access), accessReply(access))
-        if (turnsInLastHour(ec, userId) >= turnsPerHour())
-            return response(conversationId, "RATE_LIMITED", "You have sent ${turnsPerHour()} messages to the agent in the last hour; try again later.".toString())
+        int turnLimit = turnsPerHour()
+        if (turnsInLastHour(ec, userId) >= turnLimit)
+            return response(conversationId, "RATE_LIMITED", "You have sent ${turnLimit} messages to the agent in the last hour; try again later.".toString())
         if (overDailyCap(ec, pinned)) return response(conversationId, "OVER_BUDGET", "The agent's budget for this tenant is spent for today (UTC).")
 
         Map scrubbed = PasteScrubber.scrub(text)
