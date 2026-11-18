@@ -29,7 +29,7 @@ import java.util.regex.Pattern
  * DAR-BE-159. One person's message to the agent, end to end, inside one request (send#AgentTurn).
  *
  *   checks   the agent is ON for the tenant; the audit (and finding, and conversation) is the tenant's and the person's;
- *            20 turns an hour per person; the tenant's daily dollar cap
+ *            the turnsPerUserPerHour setting per person; the tenant's daily dollar cap
  *   pin      the active tenant, once; every row this turn writes carries it, whatever another tab does
  *   scrub    keys, secrets, emails and phones out of the text (PasteScrubber) before it is stored or sent
  *   ROUTER   Sonnet, no thinking, no tools, never record data: items[] {kind, span, refs, confidence}, or one question
