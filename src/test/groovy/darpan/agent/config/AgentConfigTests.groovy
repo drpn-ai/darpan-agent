@@ -208,4 +208,113 @@ class AgentConfigTests {
         assertTrue(scanned > 0, "the scan must see the darpan data files")
         assertEquals([], hits)
     }
+
+    // ------------------------------------------------------------------ texts (Task 5)
+
+    /** Today's words, copied from the code at 0091851 (a122439 for the reasons): each {token} stands where an interpolation was. */
+    private static final Map<String, String> TODAYS_WORDS = [
+            "reply.DECLINE"               : "That is outside what I can do here. I create and maintain this tenant's audit checks: setting up an audit, its statements and checks, why a finding is open or closed, and changes to their rules, exclusions, fix wording and causes. Ask about one of those.",
+            "reply.NOTHING_CAME_OUT"      : "I could not put an answer together this time; nothing was changed. Ask again, or name the finding, record or statement you mean.",
+            "reply.CLARIFY"               : "Which finding, record or statement do you mean?",
+            "reply.TENANT_CHANGED"        : "You switched tenant while I was working, so I stopped; nothing was changed in the tenant you switched to.",
+            "reply.STOPPED"               : "I stopped before finishing: {why}. Nothing was changed beyond what is listed; ask again, or narrow the question.",
+            "reason.BUDGET"               : "I reached my limit of steps for one message",
+            "reason.LOOP"                 : "I kept asking for the same data",
+            "reason.MAX_TOKENS"           : "my answer ran past its length limit",
+            "reason.REFUSED"              : "the model declined to work on this message",
+            "reason.NO_ACCESS"            : "your AI access changed while I was working",
+            "reason.INVALID_EVIDENCE"     : "I could not read back what I had found",
+            "reason.ERROR"                : "something went wrong on our side",
+            "reply.RATE_LIMITED"          : "You have sent {count} messages to the agent in the last hour; try again later.",
+            "reply.OVER_BUDGET"           : "The agent's budget for this tenant is spent for today (UTC).",
+            "reply.NOT_STORED"            : "Your message could not be stored; nothing was changed. Try again.",
+            "reply.FAILED"                : "Something went wrong on our side; nothing was changed.",
+            "reply.FAILED_AFTER_DRAFTING" : "Something went wrong on our side after drafting {made}. A proposal changes nothing until a person approves it; nothing else was changed.",
+            "reply.OUT_OF_TIME"           : "I ran out of time for this message; ask again for the rest.",
+            "reply.AGENT_UNAVAILABLE"     : "The agent cannot reach Claude right now; try again in a few minutes. Nothing was changed.",
+            "reply.AGENT_OFF"             : "The AI agent is off for this tenant; a Darpan admin can turn it on. Nothing was changed.",
+            "reply.UNAVAILABLE_MID_TURN"  : "The agent cannot reach Claude right now; try again later.",
+            "reply.SWITCHED_OFF_MID_TURN" : "The agent was switched off for this tenant.",
+            "reply.ACCESS_EXPIRED"        : "Your AI access ended on {day}.",
+            "reply.ACCESS_PAUSED_ADMIN"   : "Your AI access is paused; a Darpan admin can lift it.",
+            "reply.ACCESS_PAUSED_LIMIT"   : "Your AI access is paused at its spending limit; a Darpan admin can lift it.",
+            "reply.ACCESS_NOT_GRANTED"    : "AI is not on for you in this tenant; a Darpan admin can turn it on.",
+            "reply.TYPED_VALUES"          : "These values came only from system or customer data, not from you: {values}{more}. If you want them in the change, type them yourself.",
+            "notice.ANSWER_MISSING"       : "Your evidence has no answer, and the person asked a question. Write the short answer from the evidence so far, citing ids; read again only what it lacks.",
+            "notice.SAME_AS_EARLIER"      : "SAME_AS_EARLIER: you made this exact call earlier in this turn; its result is above and has not changed. Work from it.",
+            "notice.REPEAT"               : "You are repeating a read you already have, so no more tool calls will run. Return the evidence JSON now from what you have read, and say in it what you could not see.",
+            "notice.LAST_REQUEST"         : "This is your last request: no tool you call now will run. Return the evidence JSON now from what you have read, and say in it what you could not check."]
+
+    @Test
+    @DisplayName("every text default renders to today's string")
+    void everyTextDefaultRendersToTodaysString() {
+        AgentConfig c = AgentConfig.current(ec)
+        TODAYS_WORDS.each { String id, String words -> assertEquals(words, AgentTextDefaults.TEXTS[id], id) }
+        assertEquals("You have sent 20 messages to the agent in the last hour; try again later.", c.text("reply.RATE_LIMITED", [count: 20]))
+        assertEquals("Your AI access ended on 2026-11-02.", c.text("reply.ACCESS_EXPIRED", [day: "2026-11-02"]))
+        assertEquals("The agent is down for a fix on our side; Darpan staff have been alerted. Nothing was changed.", c.text("reply.AGENT_REFUSED"))
+        // Every text is accounted for: today's words, the one new refusal reply, and the tools.
+        Set<String> expected = new TreeSet<>(TODAYS_WORDS.keySet()); expected << "reply.AGENT_REFUSED"
+        List<Map> tools = (List<Map>) new groovy.json.JsonSlurper().parse(AgentConfigTests.class.classLoader.getResourceAsStream("darpan/agent/tools.json"))
+        assertEquals(15, tools.size())
+        tools.each { Map t ->
+            expected << ("tool." + t.name)
+            assertEquals(t.description, c.text("tool." + t.name), "tool.${t.name}".toString())
+        }
+        assertEquals(expected, new TreeSet<>(AgentTextDefaults.TEXTS.keySet()))
+        AgentTextDefaults.TEXTS.each { String id, String text -> assertNull(AgentTextDefaults.validTextError(id, text), "the default of ${id} is a valid text".toString()) }
+    }
+
+    @Test
+    @DisplayName("an invalid text row falls back to its default")
+    void invalidTextRowFallsBack() {
+        AgentConfigTestSupport.set(ec, [AgentText: [
+                [textId: "reply.RATE_LIMITED", textValue: "Slow down."],                    // missing {count}
+                [textId: "reply.DECLINE", textValue: "Try <b>again</b>."],                   // markup
+                [textId: "reply.OUT_OF_TIME", textValue: "Out of time {count}."],            // a token the default has not
+                [textId: "reply.FAILED", textValue: "   "],                                   // blank
+                [textId: "reply.NOT_STORED", textValue: "Not stored { oops."],                // stray brace
+                [textId: "tool.get_finding", textValue: "x" * 2001],                          // too long
+                [textId: "reply.NOT_A_TEXT", textValue: "ignored"],                           // unknown id
+                [textId: "reply.CLARIFY", textValue: "Which one do you mean?"]]])            // valid
+        AgentConfig c = AgentConfig.current(ec)
+        assertEquals("You have sent 5 messages to the agent in the last hour; try again later.", c.text("reply.RATE_LIMITED", [count: 5]))
+        assertEquals(TODAYS_WORDS["reply.DECLINE"], c.text("reply.DECLINE"))
+        assertEquals(TODAYS_WORDS["reply.OUT_OF_TIME"], c.text("reply.OUT_OF_TIME"))
+        assertEquals(TODAYS_WORDS["reply.FAILED"], c.text("reply.FAILED"))
+        assertEquals(TODAYS_WORDS["reply.NOT_STORED"], c.text("reply.NOT_STORED"))
+        assertEquals(AgentTextDefaults.TEXTS["tool.get_finding"], c.text("tool.get_finding"))
+        assertEquals("Which one do you mean?", c.text("reply.CLARIFY"), "a valid row beats the default")
+        AgentConfigTestSupport.clear(ec)
+        assertEquals(TODAYS_WORDS["reply.CLARIFY"], AgentConfig.current(ec).text("reply.CLARIFY"), "a reset brings the default back")
+    }
+
+    @Test
+    @DisplayName("a text edit must keep the default's tokens and no markup, within the cap")
+    void textRules() {
+        assertNull(AgentTextDefaults.validTextError("reply.RATE_LIMITED", "{count} is the limit."))
+        assertEquals("Unknown agent text nope.", AgentTextDefaults.validTextError("nope", "x"))
+        assertEquals("The text is empty.", AgentTextDefaults.validTextError("reply.FAILED", " "))
+        assertEquals("The text is longer than 1000 characters.", AgentTextDefaults.validTextError("reply.FAILED", "a" * 1001))
+        assertNull(AgentTextDefaults.validTextError("tool.get_finding", "a" * 2000))
+        assertEquals("The text is longer than 2000 characters.", AgentTextDefaults.validTextError("tool.get_finding", "a" * 2001))
+        ["a <b>", "a > b", "use `code`", "a *bold*", "see [x](y)"].each {
+            assertEquals("Plain text only: no markup.", AgentTextDefaults.validTextError("reply.FAILED", it), it)
+        }
+        assertEquals("The text must use exactly {why} — the same as the default.", AgentTextDefaults.validTextError("reply.STOPPED", "Stopped."))
+        assertEquals("The text must use exactly {values}, {more} — the same as the default.", AgentTextDefaults.validTextError("reply.TYPED_VALUES", "{values}"))
+        assertEquals("The text must use no {…} slots.", AgentTextDefaults.validTextError("reply.FAILED", "Failed {why}."))
+        assertEquals("The text must use no {…} slots.", AgentTextDefaults.validTextError("reply.FAILED", "Failed }."))
+        assertEquals(["count"] as Set, AgentTextDefaults.tokens("a {count} b {count}"))
+    }
+
+    @Test
+    @DisplayName("tokens are replaced plainly: nothing is evaluated and a value is never scanned again")
+    void plainSubstitution() {
+        AgentConfig c = AgentConfig.defaults().with(texts: ["reply.RATE_LIMITED": "Sent {count}."])
+        assertEquals('Sent ${1+1}.', c.text("reply.RATE_LIMITED", [count: '${1+1}']), "a Groovy expression in a value is only text")
+        assertEquals('Sent $1 \\ {count}.', c.text("reply.RATE_LIMITED", [count: '$1 \\ {count}']), "regex and token characters in a value are only text")
+        assertEquals("Sent {count}.", c.text("reply.RATE_LIMITED"), "a token with no value stays as written")
+        assertThrows(IllegalArgumentException) { c.text("reply.NOPE") }
+    }
 }

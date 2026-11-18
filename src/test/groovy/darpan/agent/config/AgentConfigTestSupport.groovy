@@ -5,7 +5,7 @@ import darpan.config.DarpanSettings
 /** DAR-BE-307 test helper: writes or deletes the agent config rows and the settings rows, then expires the snapshots. */
 class AgentConfigTestSupport {
     static final List<String> ENTITIES = ["darpan.agent.AgentRoleConfig", "darpan.agent.AgentModelPrice", "darpan.agent.AgentPrompt",
-            "darpan.agent.AgentPromptVersion", "darpan.agent.AgentTenantCap"]
+            "darpan.agent.AgentPromptVersion", "darpan.agent.AgentTenantCap", "darpan.agent.AgentText"]
 
     /** rows: entity short name (AgentRoleConfig, ...) to a list of field maps; each is created or updated. */
     static void set(def ec, Map<String, List<Map>> rows) {

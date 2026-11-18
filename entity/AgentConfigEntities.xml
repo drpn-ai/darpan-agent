@@ -54,4 +54,15 @@
         <field name="lastChangedByUserId" type="id"/>
         <field name="lastChangedDate" type="date-time"/>
     </entity>
+
+    <entity entity-name="AgentText" package="darpan.agent" use="configuration" cache="never">
+        <description>An edited agent text: a tool description (tool.*), a reply a person reads (reply.*, reason.*) or a notice the model
+            reads (notice.*). The default lives in darpan.agent.config.AgentTextDefaults; an edit keeps the default's {tokens}, is plain
+            text and stays within the length cap, or AgentConfig ignores it. A tool's name, schema and allow-list are never text.</description>
+        <field name="textId" type="id-long" is-pk="true"/>
+        <field name="textValue" type="text-long" not-null="true"/>
+        <field name="defaultSha256" type="text-short"><description>Hash of the shipped default when the edit was saved.</description></field>
+        <field name="lastChangedByUserId" type="id"/>
+        <field name="lastChangedDate" type="date-time"/>
+    </entity>
 </entities>

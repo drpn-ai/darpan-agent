@@ -9,6 +9,7 @@ import darpan.agent.claude.AnthropicModelGateway
 import darpan.agent.claude.ModelGateway
 import darpan.agent.config.AgentConfig
 import darpan.agent.config.AgentLimits
+import darpan.agent.config.AgentTextDefaults
 import darpan.agent.loop.AgentRoleLoop
 import darpan.agent.loop.AgentToolExecutor
 import darpan.agent.loop.AgentUsageLedger
@@ -56,13 +57,6 @@ class AgentOrchestrator {
 
     /** A role that could not send one request in time (AgentRoleLoop.MIN_REQUEST_TIMEOUT_MS) does not start. */
     static final long MIN_ROLE_MS = AgentRoleLoop.MIN_REQUEST_TIMEOUT_MS
-
-    static final String DECLINE = "That is outside what I can do here. I create and maintain this tenant's audit checks: setting up an audit, its statements and checks, why a finding is open or closed, and changes to their rules, exclusions, fix wording and causes. Ask about one of those."
-    /** The reply when a turn would otherwise end with nothing for the person: never an empty answer. */
-    static final String NOTHING_CAME_OUT = "I could not put an answer together this time; nothing was changed. Ask again, or name the finding, record or statement you mean."
-    /** Asked of the investigator once when an item needs an answer and its evidence came back without one. */
-    static final String ANSWER_MISSING = "Your evidence has no answer, and the person asked a question. Write the short answer from the evidence so far, citing ids; read again only what it lacks."
-    static final String CLARIFY = "Which finding, record or statement do you mean?"
 
     static final Set<String> BRAIN_KINDS = (["CAUSE_FEEDBACK", "RULE_NEW", "RULE_CHANGE", "CORRECTION", "SETUP"] as Set<String>).asImmutable()
     static final Set<String> ANSWER_KINDS = (["EXPLAIN", "INVESTIGATION_PASTE"] as Set<String>).asImmutable()
@@ -126,9 +120,9 @@ class AgentOrchestrator {
         AgentConfig cfg = AgentConfig.current(ec)
         AgentLimits lim = AgentLimits.read()
         String state = availability.call(ec, cfg, lim)
-        if (state != AgentSwitch.ON) return response(conversationId, state ?: AgentSwitch.AGENT_OFF, unavailableReply(state))
+        if (state != AgentSwitch.ON) return response(conversationId, state ?: AgentSwitch.AGENT_OFF, unavailableReply(cfg, state))
         // A role whose model has no price never sends: its spend could not be counted. Checked on this turn's own snapshot.
-        if (AgentAvailability.pricingRefusal(cfg)) return response(conversationId, AgentAvailability.AGENT_REFUSED, unavailableReply(AgentAvailability.AGENT_REFUSED))
+        if (AgentAvailability.pricingRefusal(cfg)) return response(conversationId, AgentAvailability.AGENT_REFUSED, unavailableReply(cfg, AgentAvailability.AGENT_REFUSED))
 
         String pinned = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         String userId = ec.user.userId as String
@@ -154,11 +148,11 @@ class AgentOrchestrator {
         }
         // DAR-BE-194: the person needs a live grant of AI access in this tenant (a Darpan admin gives it); nothing is written otherwise.
         Map access = AgentAccess.access(ec, pinned, userId)
-        if (access.state != AgentAccess.LIVE) return response(conversationId, accessOutcome(access), accessReply(access))
+        if (access.state != AgentAccess.LIVE) return response(conversationId, accessOutcome(access), accessReply(cfg, access))
         int turnLimit = lim.turnsPerUserPerHour
         if (turnsInLastHour(ec, userId) >= turnLimit)
-            return response(conversationId, "RATE_LIMITED", "You have sent ${turnLimit} messages to the agent in the last hour; try again later.".toString())
-        if (overDailyCap(ec, pinned, cfg, lim)) return response(conversationId, "OVER_BUDGET", "The agent's budget for this tenant is spent for today (UTC).")
+            return response(conversationId, "RATE_LIMITED", cfg.text("reply.RATE_LIMITED", [count: turnLimit]))
+        if (overDailyCap(ec, pinned, cfg, lim)) return response(conversationId, "OVER_BUDGET", cfg.text("reply.OVER_BUDGET"))
 
         Map scrubbed = PasteScrubber.scrub(text)
         Turn turn = new Turn(ec: ec, pinned: pinned, userId: userId, grantId: access.grantId as String, auditId: auditId, auditCode: audit.auditCode as String, findingId: findingId,
@@ -181,7 +175,7 @@ class AgentOrchestrator {
         } catch (Exception e) {
             logger.error("Agent message in conversation ${turn.conversationId} could not be stored".toString(), e)
             ec.message.clearErrors()
-            return response(fresh ? null : conversationId, "ERROR", "Your message could not be stored; nothing was changed. Try again.")
+            return response(fresh ? null : conversationId, "ERROR", cfg.text("reply.NOT_STORED"))
         }
 
         turn.priorIds = turn.transcript.madeIds()
@@ -274,18 +268,18 @@ class AgentOrchestrator {
      * the reply lists it instead of claiming nothing was changed. Drafts apply only once a person approves them.
      */
     static String failedReply(Turn turn) {
-        if (!turn.proposals && !turn.tickets) return "Something went wrong on our side; nothing was changed."
+        if (!turn.proposals && !turn.tickets) return turn.cfg.text("reply.FAILED")
         List<String> made = []
         if (turn.proposals) made << "proposals ${turn.proposals.keySet().join(', ')}".toString()
         if (turn.tickets) made << "tickets ${turn.tickets.keySet().join(', ')}".toString()
-        return "Something went wrong on our side after drafting ${made.join(' and ')}. A proposal changes nothing until a person approves it; nothing else was changed.".toString()
+        return turn.cfg.text("reply.FAILED_AFTER_DRAFTING", [made: made.join(' and ')])
     }
 
     private void runTurn(Turn turn) {
         List<Map> items = route(turn)
         if (items == null) return
         items = items.findAll { it.kind != "OTHER" }
-        if (!items) { turn.outcome = "DECLINED"; turn.replyParts << DECLINE; return }
+        if (!items) { turn.outcome = "DECLINED"; turn.replyParts << turn.cfg.text("reply.DECLINE"); return }
 
         boolean brain = items.any { it.kind in BRAIN_KINDS }
         boolean answer = items.any { it.kind in ANSWER_KINDS }
@@ -302,14 +296,14 @@ class AgentOrchestrator {
             Map found = investigate(turn, items, null, earlier ?: [])
             // A question deserves an answer: one more request from the facts already found, before any reply goes out empty.
             if (answer && !found.answer && !found.stopped) {
-                Map again = investigate(turn, items, ANSWER_MISSING, (List<Map>) found.facts)
+                Map again = investigate(turn, items, turn.cfg.text("notice.ANSWER_MISSING"), (List<Map>) found.facts)
                 found = again.stopped ? found : again
             }
             evidence = [facts: found.facts]
             turn.facts = (List<Map>) found.facts
             if (answer && found.answer) turn.replyParts << (found.answer as String)
             // With brain items the author goes on with what was found; it can ask for more evidence itself.
-            if (found.stopped && !brain) { turn.outcome = "INCOMPLETE"; turn.replyParts << stoppedReply(found.stopped as String); return }
+            if (found.stopped && !brain) { turn.outcome = "INCOMPLETE"; turn.replyParts << stoppedReply(turn.cfg, found.stopped as String); return }
         }
         if (brain) authorWithEscalation(turn, items, evidence)
         else if (items.any { it.kind in TICKET_KINDS }) author(turn, items.findAll { it.kind in TICKET_KINDS }, null, RoleSpec.author(turn.cfg, turn.limits).copy(tools: ["raise_ticket"]))
@@ -333,7 +327,7 @@ class AgentOrchestrator {
         // itself is still asked.
         boolean unsure = !turn.findingId && items.any { (it.confidence as BigDecimal) < turn.limits.minConfidence }
         if (question || unsure) {
-            turn.question = [text: question ?: CLARIFY, options: [], from: RoleSpec.ROUTER]
+            turn.question = [text: question ?: turn.cfg.text("reply.CLARIFY"), options: [], from: RoleSpec.ROUTER]
             turn.outcome = "QUESTION"
             return null
         }
@@ -463,7 +457,7 @@ class AgentOrchestrator {
             }
             if (r.outcome != "MORE_EVIDENCE") {
                 turn.outcome = "INCOMPLETE"
-                turn.replyParts << stoppedReply(r.outcome)
+                turn.replyParts << stoppedReply(turn.cfg, r.outcome)
                 return
             }
             rounds++
@@ -541,16 +535,16 @@ class AgentOrchestrator {
      */
     private RoleResult role(Turn turn, RoleSpec base, List<MessageParam> messages) {
         long left = turn.deadline - clock.call()
-        if (left < MIN_ROLE_MS) throw new Stop("INCOMPLETE", "I ran out of time for this message; ask again for the rest.")
-        if (overDailyCap(turn.ec, turn.pinned, turn.cfg, turn.limits)) throw new Stop("OVER_BUDGET", "The agent's budget for this tenant is spent for today (UTC).")
+        if (left < MIN_ROLE_MS) throw new Stop("INCOMPLETE", turn.cfg.text("reply.OUT_OF_TIME"))
+        if (overDailyCap(turn.ec, turn.pinned, turn.cfg, turn.limits)) throw new Stop("OVER_BUDGET", turn.cfg.text("reply.OVER_BUDGET"))
         // The grant is read again before every role: one that reached its limit, was paused or revoked mid-turn stops the next role.
         Map access = AgentAccess.access(turn.ec, turn.pinned, turn.userId)
-        if (access.state != AgentAccess.LIVE) throw new Stop(accessOutcome(access), accessReply(access))
+        if (access.state != AgentAccess.LIVE) throw new Stop(accessOutcome(access), accessReply(turn.cfg, access))
         turn.grantId = access.grantId as String
         // The switch is read again before every role: turned off mid-turn, the next role does not start.
         String state = availability.call(turn.ec, turn.cfg, turn.limits)
         if (state != AgentSwitch.ON) throw new Stop(state ?: AgentSwitch.AGENT_OFF, state == AgentSwitch.AGENT_UNAVAILABLE ?
-                "The agent cannot reach Claude right now; try again later." : "The agent was switched off for this tenant.")
+                turn.cfg.text("reply.UNAVAILABLE_MID_TURN") : turn.cfg.text("reply.SWITCHED_OFF_MID_TURN"))
         RoleSpec spec = left < base.wallClockMs ? base.copy(wallClockMs: left) : base
         String turnId
         try {
@@ -561,12 +555,12 @@ class AgentOrchestrator {
         RoleResult r = runRole(turn.ec, spec, turn.pinned, messages, turnId)
         record(turn, spec, r, turnId)
         if (r.outcome == "TENANT_CHANGED") throw new Stop("TENANT_CHANGED", null)
-        if (r.outcome == "UNAVAILABLE") throw new Stop(AgentSwitch.AGENT_UNAVAILABLE, "The agent cannot reach Claude right now; try again later.")
+        if (r.outcome == "UNAVAILABLE") throw new Stop(AgentSwitch.AGENT_UNAVAILABLE, turn.cfg.text("reply.UNAVAILABLE_MID_TURN"))
         if (r.outcome == "NO_ACCESS") {
             // The grant reached its limit (or was paused, revoked or expired) mid-role: the role stopped before its next request.
             Map now = AgentAccess.access(turn.ec, turn.pinned, turn.userId)
-            if (now.state != AgentAccess.LIVE) throw new Stop(accessOutcome(now), accessReply(now))
-            throw new Stop("INCOMPLETE", stoppedReply("NO_ACCESS"))
+            if (now.state != AgentAccess.LIVE) throw new Stop(accessOutcome(now), accessReply(turn.cfg, now))
+            throw new Stop("INCOMPLETE", stoppedReply(turn.cfg, "NO_ACCESS"))
         }
         return r
     }
@@ -616,13 +610,13 @@ class AgentOrchestrator {
     private Map finish(Turn turn) {
         List<Map> proposals = new ArrayList<Map>(turn.proposals.values())
         List<String> blocked = proposals.findAll { it.provenanceStatus == "BLOCKED" }.collectMany { (List<String>) it.blockedIds }.unique()
-        if (blocked && turn.question == null) turn.question = [text: provenanceQuestion(blocked), options: [], from: "PROVENANCE"]
+        if (blocked && turn.question == null) turn.question = [text: provenanceQuestion(turn.cfg, blocked), options: [], from: "PROVENANCE"]
         String outcome = turn.outcome ?: (turn.question != null ? "QUESTION" : "DONE")
         if (outcome == "DONE" && turn.question != null) outcome = "QUESTION"
         String reply = turn.replyParts.findAll { it }.join("\n\n") ?: null
         // Never an empty answer: a turn that made nothing, asked nothing and says nothing tells the person so.
         if (!reply && turn.question == null && !proposals && !turn.tickets) {
-            reply = outcome == "TENANT_CHANGED" ? TENANT_CHANGED_REPLY : NOTHING_CAME_OUT
+            reply = turn.cfg.text(outcome == "TENANT_CHANGED" ? "reply.TENANT_CHANGED" : "reply.NOTHING_CAME_OUT")
             if (outcome == "DONE") outcome = "INCOMPLETE"
         }
         Map out = response(turn.conversationId, outcome, reply)
@@ -637,38 +631,27 @@ class AgentOrchestrator {
     static final int MAX_ECHOED_ID_CHARS = 64
 
     /** The question a blocked proposal turns into: at most 5 of its ids, each cut at 64 characters. */
-    static String provenanceQuestion(List<String> blocked) {
+    static String provenanceQuestion(AgentConfig cfg, List<String> blocked) {
         List<String> shown = blocked.take(MAX_ECHOED_IDS).collect { String id -> id.length() <= MAX_ECHOED_ID_CHARS ? id : id.substring(0, MAX_ECHOED_ID_CHARS) + "..." }
         String more = blocked.size() > MAX_ECHOED_IDS ? " (and ${blocked.size() - MAX_ECHOED_IDS} more)".toString() : ""
-        return "These values came only from system or customer data, not from you: ${shown.join(', ')}${more}. If you want them in the change, type them yourself.".toString()
+        return cfg.text("reply.TYPED_VALUES", [values: shown.join(', '), more: more])
     }
 
     private static Map response(String conversationId, String outcome, String reply) {
         return [conversationId: conversationId, outcome: outcome, reply: reply, proposals: [], tickets: [], question: null, masked: []]
     }
 
-    static final String TENANT_CHANGED_REPLY = "You switched tenant while I was working, so I stopped; nothing was changed in the tenant you switched to."
-
-    /** Why a role stopped, in words; the code itself stays in the turn row for staff. */
-    static final Map<String, String> STOPPED_BECAUSE = [
-            BUDGET          : "I reached my limit of steps for one message",
-            LOOP            : "I kept asking for the same data",
-            MAX_TOKENS      : "my answer ran past its length limit",
-            REFUSED         : "the model declined to work on this message",
-            NO_ACCESS       : "your AI access changed while I was working",
-            INVALID_EVIDENCE: "I could not read back what I had found",
-            ERROR           : "something went wrong on our side"].asImmutable()
-
-    static String stoppedReply(String outcome) {
-        String why = STOPPED_BECAUSE[outcome] ?: "something went wrong on our side"
-        return "I stopped before finishing: ${why}. Nothing was changed beyond what is listed; ask again, or narrow the question.".toString()
+    /** Why a role stopped, in words (reason.* text); the code itself stays in the turn row for staff. */
+    static String stoppedReply(AgentConfig cfg, String outcome) {
+        String id = "reason." + outcome
+        String why = cfg.text(AgentTextDefaults.TEXTS.containsKey(id) ? id : "reason.ERROR")
+        return cfg.text("reply.STOPPED", [why: why])
     }
 
     /** What the person reads when the agent cannot run before the turn starts. */
-    static String unavailableReply(String state) {
-        if (state == AgentAvailability.AGENT_REFUSED) return "The agent is down for a fix on our side (its setup was refused by Claude); Darpan staff have been alerted. Nothing was changed."
-        return state == AgentSwitch.AGENT_UNAVAILABLE ? "The agent cannot reach Claude right now; try again in a few minutes. Nothing was changed." :
-                "The AI agent is off for this tenant; a Darpan admin can turn it on. Nothing was changed."
+    static String unavailableReply(AgentConfig cfg, String state) {
+        if (state == AgentAvailability.AGENT_REFUSED) return cfg.text("reply.AGENT_REFUSED")
+        return cfg.text(state == AgentSwitch.AGENT_UNAVAILABLE ? "reply.AGENT_UNAVAILABLE" : "reply.AGENT_OFF")
     }
 
     // ---------------------------------------------------------------- limits
@@ -683,15 +666,14 @@ class AgentOrchestrator {
     }
 
     /** What the person reads when their grant does not let the turn run; an end date is shown as yyyy-MM-dd (UTC). */
-    static String accessReply(Map access) {
+    static String accessReply(AgentConfig cfg, Map access) {
         switch (access.state) {
             case AgentAccess.EXPIRED:
                 String day = (access.thruDate as Timestamp).toInstant().atZone(java.time.ZoneOffset.UTC).toLocalDate().toString()
-                return "Your AI access ended on ${day}.".toString()
+                return cfg.text("reply.ACCESS_EXPIRED", [day: day])
             case AgentAccess.PAUSED:
-                return access.pauseReason == AgentAccess.REASON_ADMIN ? "Your AI access is paused; a Darpan admin can lift it." :
-                        "Your AI access is paused at its spending limit; a Darpan admin can lift it."
-            default: return "AI is not on for you in this tenant; a Darpan admin can turn it on."
+                return cfg.text(access.pauseReason == AgentAccess.REASON_ADMIN ? "reply.ACCESS_PAUSED_ADMIN" : "reply.ACCESS_PAUSED_LIMIT")
+            default: return cfg.text("reply.ACCESS_NOT_GRANTED")
         }
     }
 

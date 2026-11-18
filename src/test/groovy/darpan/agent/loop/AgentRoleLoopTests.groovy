@@ -14,6 +14,7 @@ import darpan.agent.AgentCallMarker
 import darpan.agent.claude.ModelGateway
 import darpan.agent.config.AgentConfig
 import darpan.agent.config.AgentConfigTestSupport
+import darpan.agent.config.AgentTextDefaults
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
@@ -269,7 +270,7 @@ class AgentRoleLoopTests {
         assertEquals("DONE", r.outcome)
         List<Map> afterRepeat = (List<Map>) wire(gateway.sent[2]).messages.last().content
         assertEquals(["tool_result", "text"], afterRepeat*.type)
-        assertEquals(AgentRoleLoop.REPEAT_NOTICE, afterRepeat[1].text)
+        assertEquals(AgentTextDefaults.TEXTS["notice.REPEAT"], afterRepeat[1].text)
         assertEquals([type: "none"], wire(gateway.sent[3]).tool_choice)
         assertEquals("tool_result", ((List<Map>) wire(gateway.sent[3]).messages.last().content)[0].type, "each call still gets its result")
     }
@@ -287,7 +288,7 @@ class AgentRoleLoopTests {
         List<Map> second = (List<Map>) wire(gateway.sent[2]).messages.last().content
         assertEquals("tool_result", second[0].type)
         assertEquals("tu_2", second[0].tool_use_id)
-        assertEquals(AgentRoleLoop.SAME_AS_EARLIER, second[0].content instanceof List ? second[0].content[0].text : second[0].content)
+        assertEquals(AgentTextDefaults.TEXTS["notice.SAME_AS_EARLIER"], second[0].content instanceof List ? second[0].content[0].text : second[0].content)
         assertTrue(AgentToolExecutor.isReadTool("get_finding") && !AgentToolExecutor.isReadTool("propose_exclusion") &&
                 !AgentToolExecutor.isReadTool("raise_ticket") && !AgentToolExecutor.isReadTool("ask_human"))
     }
@@ -325,7 +326,20 @@ class AgentRoleLoopTests {
         assertFalse(second.last().content.any { it.type == "text" }, "a request that is not the last carries tool results only")
         List<Map> last = (List<Map>) wire(gateway.sent[2]).messages.last().content
         assertEquals(["tool_result", "text"], last*.type, "tool results first, then the notice")
-        assertEquals(AgentRoleLoop.LAST_REQUEST_NOTICE, last[1].text)
+        assertEquals(AgentTextDefaults.TEXTS["notice.LAST_REQUEST"], last[1].text)
+    }
+
+    @Test
+    void "an edited notice is sent on the last request"() {
+        def gateway = new ScriptedGateway([
+                msg("tool_use", [toolUse("tu_1", "search_knowledge", [words: "a"])]),
+                msg("tool_use", [toolUse("tu_2", "search_knowledge", [words: "b"])]),
+                msg("end_turn", [text("Answer from what was read.")])])
+        AgentConfig edited = AgentConfig.defaults().with(texts: ["notice.LAST_REQUEST": "Last one: answer now."])
+        RoleResult r = run(RoleSpec.investigator(edited).copy(systemPromptPath: PROMPT, maxRequests: 3), gateway)
+        assertEquals("DONE", r.outcome)
+        List<Map> last = (List<Map>) wire(gateway.sent[2]).messages.last().content
+        assertEquals("Last one: answer now.", last[1].text)
     }
 
     @Test

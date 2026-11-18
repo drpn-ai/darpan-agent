@@ -6,6 +6,7 @@ import darpan.agent.loop.AgentRoleLoop
 import darpan.agent.config.AgentConfig
 import darpan.agent.config.AgentConfigTestSupport
 import darpan.agent.config.AgentLimits
+import darpan.agent.config.AgentTextDefaults
 import darpan.agent.loop.AgentRoleLoopTests
 import darpan.agent.loop.RoleResult
 import darpan.agent.loop.RoleSpec
@@ -236,13 +237,13 @@ class AgentOrchestratorTests {
         Map out = send(new AgentOrchestrator(g, AVAILABLE), "Why is this one open?")
         assertEquals("DONE", out.outcome, out.toString())
         assertEquals("${FINDING} is open: its state is OPEN.".toString(), out.reply)
-        assertTrue(sentJson(g, 2).contains(AgentOrchestrator.ANSWER_MISSING), "the second ask says what is missing")
+        assertTrue(sentJson(g, 2).contains(AgentTextDefaults.TEXTS["notice.ANSWER_MISSING"]), "the second ask says what is missing")
 
         def empty = new AgentRoleLoopTests.ScriptedGateway([
                 router([item("EXPLAIN", "Why is this one open?", 0.9, [FINDING])]), evidence(facts, ""), evidence(facts, "")])
         Map silent = send(new AgentOrchestrator(empty, AVAILABLE), "Why is this one open?")
         assertEquals("INCOMPLETE", silent.outcome)
-        assertEquals(AgentOrchestrator.NOTHING_CAME_OUT, silent.reply, "never an empty reply")
+        assertEquals(AgentTextDefaults.TEXTS["reply.NOTHING_CAME_OUT"], silent.reply, "never an empty reply")
     }
 
     @Test
@@ -256,7 +257,7 @@ class AgentOrchestratorTests {
         assertNotNull(wire(g.sent[4]).cache_control, "the 4th investigator request still caches")
         assertNull(wire(g.sent[5]).cache_control, "the last investigator request has no cache marker")
         List<Map> last = (List<Map>) wire(g.sent[5]).messages.last().content
-        assertEquals(AgentRoleLoop.LAST_REQUEST_NOTICE, last.last().text)
+        assertEquals(AgentTextDefaults.TEXTS["notice.LAST_REQUEST"], last.last().text)
     }
 
     @Test
@@ -421,7 +422,7 @@ class AgentOrchestratorTests {
     @Test
     void "a provenance question echoes at most five ids of at most 64 characters"() {
         String longId = "X" * 80
-        String q = AgentOrchestrator.provenanceQuestion([longId, "A1", "A2", "A3", "A4", "A5", "A6"])
+        String q = AgentOrchestrator.provenanceQuestion(AgentConfig.defaults(), [longId, "A1", "A2", "A3", "A4", "A5", "A6"])
         assertTrue(q.contains("X" * 64 + "..."), q)
         assertFalse(q.contains("X" * 65), q)
         assertTrue(q.contains("A4") && !q.contains("A5,") && !q.contains("A6"), q)
@@ -559,7 +560,7 @@ class AgentOrchestratorTests {
         Map out = send(new AgentOrchestrator(g, AVAILABLE), words)
 
         assertNotEquals("DECLINED", out.outcome, out.toString())
-        assertNotEquals(AgentOrchestrator.DECLINE, out.reply)
+        assertNotEquals(AgentTextDefaults.TEXTS["reply.DECLINE"], out.reply)
         assertEquals(4, g.sent.size(), "router, investigator, author twice")
         List<Map> made = (List<Map>) out.proposals
         assertEquals(["ADD_STATEMENT"], made*.kind, out.toString())
@@ -570,7 +571,7 @@ class AgentOrchestratorTests {
         def g = new AgentRoleLoopTests.ScriptedGateway([router([item("OTHER", "Write me a poem about invoices.")])])
         Map out = send(new AgentOrchestrator(g, AVAILABLE), "Write me a poem about invoices.")
         assertEquals("DECLINED", out.outcome)
-        assertEquals(AgentOrchestrator.DECLINE, out.reply)
+        assertEquals(AgentTextDefaults.TEXTS["reply.DECLINE"], out.reply)
         assertTrue((out.reply as String).contains("create and maintain this tenant's audit checks"), out.reply as String)
         assertEquals(1, g.sent.size())
         assertEquals(1L, asSystem { ec.entity.find("darpan.agent.AgentTurn").useCache(false).count() })
@@ -635,7 +636,7 @@ class AgentOrchestratorTests {
         def g = new AgentRoleLoopTests.ScriptedGateway([router([item("CAUSE_FEEDBACK", "exclude that one", 0.4)])])
         Map out = send(new AgentOrchestrator(g, AVAILABLE), "exclude that one", null)
         assertEquals("QUESTION", out.outcome)
-        assertEquals(AgentOrchestrator.CLARIFY, out.question.text)
+        assertEquals(AgentTextDefaults.TEXTS["reply.CLARIFY"], out.question.text)
         assertEquals(RoleSpec.ROUTER, out.question.from)
         assertEquals(1, g.sent.size())
 
@@ -743,7 +744,7 @@ class AgentOrchestratorTests {
         assertFalse(sentJson(g, 1).contains("Evidence so far"), "the first investigation has none")
         List<Map> repeat = (List<Map>) wire(g.sent[5]).messages.last().content
         assertEquals("tu_2", repeat[0].tool_use_id)
-        assertEquals(AgentRoleLoop.SAME_AS_EARLIER, repeat[0].content instanceof List ? repeat[0].content[0].text : repeat[0].content,
+        assertEquals(AgentTextDefaults.TEXTS["notice.SAME_AS_EARLIER"], repeat[0].content instanceof List ? repeat[0].content[0].text : repeat[0].content,
                 "the repeated read is answered from the earlier one, not run")
     }
 
@@ -1008,6 +1009,38 @@ class AgentOrchestratorTests {
         assertEquals("claude-opus-5-5", wire.model)
         assertEquals(3000, wire.max_tokens)
         assertTrue(JsonOutput.toJson(wire.system).contains("ROUTER EDIT"), "the edited prompt is on the wire")
+    }
+
+    @Test
+    void "an edited reply is what the person reads"() {
+        AgentConfigTestSupport.set(ec, [AgentText: [[textId: "reply.DECLINE", textValue: "Not something I do."]]])
+        def g = new AgentRoleLoopTests.ScriptedGateway([router([item("OTHER", "Write me a poem about invoices.")])])
+        Map out = send(new AgentOrchestrator(g, AVAILABLE), "Write me a poem about invoices.")
+        assertEquals("DECLINED", out.outcome)
+        assertEquals("Not something I do.", out.reply)
+        AgentConfigTestSupport.clear(ec)
+        def again = new AgentRoleLoopTests.ScriptedGateway([router([item("OTHER", "Write me a poem about invoices.")])])
+        assertEquals(AgentTextDefaults.TEXTS["reply.DECLINE"], send(new AgentOrchestrator(again, AVAILABLE), "Write me a poem about invoices.").reply, "a reset is today's words again")
+    }
+
+    @Test
+    void "an edited tool description is on the wire and the schema is unchanged"() {
+        List<Map> facts = [fact("findingId", FINDING, "TOOL")]
+        Closure<List<Map>> toolsSent = {
+            def g = new AgentRoleLoopTests.ScriptedGateway([router([item("EXPLAIN", "Why is this one open?", 0.9, [FINDING])]), evidence(facts, "${FINDING} is open.".toString())])
+            send(new AgentOrchestrator(g, AVAILABLE), "Why is this one open?")
+            (List<Map>) wire(g.sent[1]).tools
+        }
+        List<Map> before = toolsSent()
+        AgentConfigTestSupport.set(ec, [AgentText: [[textId: "tool.get_finding", textValue: "Read one finding of this audit."]]])
+        List<Map> after = toolsSent()
+        assertEquals(before*.name, after*.name, "the same tools, in the same order")
+        Map was = before.find { it.name == "get_finding" }, now = after.find { it.name == "get_finding" }
+        assertEquals(AgentTextDefaults.TEXTS["tool.get_finding"], was.description)
+        assertEquals("Read one finding of this audit.", now.description)
+        assertEquals(was.input_schema, now.input_schema, "the schema is the catalogue's")
+        assertEquals(was.strict, now.strict)
+        assertEquals(before.findAll { it.name != "get_finding" }, after.findAll { it.name != "get_finding" }, "the other tools are untouched")
     }
 
     @Test

@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * DAR-BE-307. The agent's non-scalar config as one immutable snapshot: role models, model prices, prompts and per-tenant daily cap
+ * DAR-BE-307. The agent's non-scalar config as one immutable snapshot: role models, model prices, prompts, texts and per-tenant daily cap
  * overrides, each the shipped default (AgentConfigDefaults) with the valid edit rows over it. Same shape as DarpanSettings: cached
  * for TTL_MS, expired after the commit of an edit, one reloader at a time, and a failed reload keeps the last snapshot. current()
  * never throws; with no framework it answers the defaults. An invalid row (direct DB edit) is ignored with a WARN and its default
@@ -48,27 +48,41 @@ class AgentConfig {
     private final Map<String, ModelPrice> prices
     private final Map<String, String> prompts
     private final Map<String, BigDecimal> tenantCaps
+    private final Map<String, String> texts
 
-    private AgentConfig(Map<String, String> models, Map<String, ModelPrice> prices, Map<String, String> prompts, Map<String, BigDecimal> tenantCaps) {
+    private AgentConfig(Map<String, String> models, Map<String, ModelPrice> prices, Map<String, String> prompts, Map<String, BigDecimal> tenantCaps,
+                        Map<String, String> texts) {
         this.models = Collections.unmodifiableMap(new LinkedHashMap<>(models))
         this.prices = Collections.unmodifiableMap(new LinkedHashMap<>(prices))
         this.prompts = Collections.unmodifiableMap(new LinkedHashMap<>(prompts))
         this.tenantCaps = Collections.unmodifiableMap(new LinkedHashMap<>(tenantCaps))
+        this.texts = Collections.unmodifiableMap(new LinkedHashMap<>(texts))
     }
 
     // ------------------------------------------------------------------ access
 
     static AgentConfig defaults() {
-        return new AgentConfig(AgentConfigDefaults.ROLE_MODELS, AgentConfigDefaults.PRICES, [:], [:])
+        return new AgentConfig(AgentConfigDefaults.ROLE_MODELS, AgentConfigDefaults.PRICES, [:], [:], [:])
     }
 
-    /** A copy with the given maps merged over this one (keys models, prices, prompts, tenantCaps). */
+    /** A copy with the given maps merged over this one (keys models, prices, prompts, tenantCaps, texts). */
     AgentConfig with(Map changes) {
         Map<String, String> m = new LinkedHashMap<>(models); if (changes.models) m.putAll((Map<String, String>) changes.models)
         Map<String, ModelPrice> p = new LinkedHashMap<>(prices); if (changes.prices) p.putAll((Map<String, ModelPrice>) changes.prices)
         Map<String, String> t = new LinkedHashMap<>(prompts); if (changes.prompts) t.putAll((Map<String, String>) changes.prompts)
         Map<String, BigDecimal> c = new LinkedHashMap<>(tenantCaps); if (changes.tenantCaps) c.putAll((Map<String, BigDecimal>) changes.tenantCaps)
-        return new AgentConfig(m, p, t, c)
+        Map<String, String> x = new LinkedHashMap<>(texts); if (changes.texts) x.putAll((Map<String, String>) changes.texts)
+        return new AgentConfig(m, p, t, c, x)
+    }
+
+    /**
+     * The effective words for a text id (AgentTextDefaults): the edit, else the shipped default, with each {token} replaced by its
+     * value in tokens. Substitution is plain: nothing is evaluated, and a value is never scanned for tokens.
+     */
+    String text(String textId, Map tokens = [:]) {
+        String base = texts.get(textId) ?: AgentTextDefaults.TEXTS.get(textId)
+        if (base == null) throw new IllegalArgumentException("Unknown agent text: ${textId}".toString())
+        return AgentTextDefaults.substitute(base, tokens)
     }
 
     /** The effective text of a prompt id: the edit, else the shipped file. */
@@ -206,7 +220,7 @@ class AgentConfig {
         try {
             return fromRows(
                     rows(use, "darpan.agent.AgentRoleConfig"), rows(use, "darpan.agent.AgentModelPrice"),
-                    rows(use, "darpan.agent.AgentPrompt"), rows(use, "darpan.agent.AgentTenantCap"))
+                    rows(use, "darpan.agent.AgentPrompt"), rows(use, "darpan.agent.AgentTenantCap"), rows(use, "darpan.agent.AgentText"))
         } finally {
             if (created) ((ExecutionContextFactoryImpl) ecfi).destroyActiveExecutionContext()
         }
@@ -216,7 +230,7 @@ class AgentConfig {
         return TenantScopedFinder.findGlobalUnscopedPerRequest(ec, entity, WHY).useCache(false).list().collect { it.getMap() as Map }
     }
 
-    static AgentConfig fromRows(List<Map> roles, List<Map> priceRows, List<Map> promptRows, List<Map> capRows) {
+    static AgentConfig fromRows(List<Map> roles, List<Map> priceRows, List<Map> promptRows, List<Map> capRows, List<Map> textRows = []) {
         Map<String, ModelPrice> p = new LinkedHashMap<>(AgentConfigDefaults.PRICES)
         for (Map r : priceRows) {
             String id = r.modelId as String
@@ -246,7 +260,14 @@ class AgentConfig {
             if (!tenant || r.dailyUsdCap == null) continue
             c.put(tenant, new BigDecimal(r.dailyUsdCap.toString()))
         }
-        return new AgentConfig(m, p, t, c)
+        Map<String, String> x = new LinkedHashMap<>()
+        for (Map r : textRows) {
+            String id = r.textId as String, value = r.textValue as String
+            String why = AgentTextDefaults.validTextError(id, value)
+            if (why != null) { logger.warn("Ignoring invalid agent text row '{}': {}", id, why); continue }
+            x.put(id, value)
+        }
+        return new AgentConfig(m, p, t, c, x)
     }
 
     static boolean validModelId(String id) { return id != null && id.matches(MODEL_ID_PATTERN) }

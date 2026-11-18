@@ -2,6 +2,7 @@ package darpan.agent.loop
 
 import darpan.agent.config.AgentConfig
 import darpan.agent.config.AgentLimits
+import darpan.agent.config.AgentTextDefaults
 import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
@@ -53,7 +54,7 @@ class AgentToolSchemaLimitTests {
 
     @Test
     void "the proposal tools are strict except propose_expected_causes, and raise_ticket is sent without strict"() {
-        Map<String, Boolean> strict = AgentToolExecutor.toolDefinitions(RoleSpec.author().tools).collectEntries { [(it.name()): it.strict().orElse(false)] }
+        Map<String, Boolean> strict = AgentToolExecutor.toolDefinitions(RoleSpec.author().tools, AgentConfig.defaults()).collectEntries { [(it.name()): it.strict().orElse(false)] }
         assertEquals([ask_human: true, propose_audit_setup: false, propose_conclusion_rows: true, propose_exclusion: true, propose_expected_causes: false,
                       propose_fix_text: true, propose_statement_edit: false, propose_statement_narrowing: true, raise_ticket: false,
                       request_more_evidence: true], strict)

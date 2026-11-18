@@ -3,6 +3,7 @@ package darpan.agent.loop
 import com.anthropic.core.ObjectMappers
 import com.anthropic.models.messages.Tool
 import darpan.agent.AgentCallMarker
+import darpan.agent.config.AgentConfig
 import darpan.facade.common.TenantAccessSupport
 import groovy.json.JsonOutput
 import org.slf4j.Logger
@@ -35,7 +36,10 @@ class AgentToolExecutor {
 
     /** name -> [name, service, control, conversationScoped, description, input_schema], in catalog order. */
     static final Map<String, Map> TOOLS = loadCatalog()
-    private static final Map<String, Tool> DEFINITIONS = TOOLS.collectEntries { String name, Map t -> [(name): definition(t)] }.asImmutable()
+    /** Built tools by name, then by description: an unchanged config builds nothing twice. */
+    private static final java.util.concurrent.ConcurrentHashMap<String, Tool> DEFINITIONS = new java.util.concurrent.ConcurrentHashMap<>()
+    /** Past this many (name, description) pairs the memo is emptied: edits are rare, so it never grows in practice. */
+    private static final int MAX_MEMO = 256
 
     final RoleSpec spec
     final String conversationId
@@ -51,11 +55,20 @@ class AgentToolExecutor {
      * The SDK tool definitions for these names, sorted by name, strict. No cache marker: tools render before the system
      * prompt, whose marker caches both (AgentRoleLoop.buildParams).
      */
-    static List<Tool> toolDefinitions(List<String> names) {
+    static List<Tool> toolDefinitions(List<String> names, AgentConfig cfg) {
         return names.toSorted().collect { String name ->
-            Tool t = DEFINITIONS[name]
+            Map t = TOOLS[name]
             if (t == null) throw new IllegalArgumentException("Unknown tool ${name}".toString())
-            t
+            // Only the description is the config's; the name, schema, strictness and service stay the catalogue's.
+            String description = cfg.text("tool." + name)
+            String key = name + "\u0000" + description
+            Tool built = DEFINITIONS.get(key)
+            if (built == null) {
+                if (DEFINITIONS.size() >= MAX_MEMO) DEFINITIONS.clear()
+                built = definition(t, description)
+                DEFINITIONS.put(key, built)
+            }
+            built
         }
     }
 
@@ -301,8 +314,8 @@ class AgentToolExecutor {
      * so the author's strict tools stay within {@link #STRICT_OPTIONAL_LIMIT}; execute validates every input either way).
      * additionalProperties:false comes from the schema.
      */
-    private static Tool definition(Map t) {
-        String json = JsonOutput.toJson([name: t.name, description: t.description, input_schema: t.input_schema])
+    private static Tool definition(Map t, String description) {
+        String json = JsonOutput.toJson([name: t.name, description: description, input_schema: t.input_schema])
         return ObjectMappers.jsonMapper().readValue(json, Tool).toBuilder().strict(isStrict(t)).build()
     }
 

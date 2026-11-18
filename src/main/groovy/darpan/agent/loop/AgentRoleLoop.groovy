@@ -60,21 +60,7 @@ class AgentRoleLoop {
     static final int SAME_CALL_LIMIT = 3
     /** Less than this left and no request (or retry) starts. */
     static final long MIN_REQUEST_TIMEOUT_MS = 5_000L
-    /**
-     * Sent after the tool results when the investigator's next request is its last: a tool it calls then never runs, so
-     * without this a wide read ends BUDGET with nothing, though what it already read usually answers the person.
-     */
-    /**
-     * The answer to a read the role already made in this turn with the same input: the result is above in the conversation,
-     * so the service is not run again and the same result is not paid for (or cached) twice.
-     */
-    static final String SAME_AS_EARLIER = "SAME_AS_EARLIER: you made this exact call earlier in this turn; its result is above and has not changed. Work from it."
-    /**
-     * Sent with the first repeated read: the investigator is going round, so it answers now. If it calls a tool anyway, its
-     * next request goes with tool_choice none, which guarantees text (eval 2026-11-10: why-01 re-read its finding to the guard).
-     */
-    static final String REPEAT_NOTICE = "You are repeating a read you already have, so no more tool calls will run. Return the evidence JSON now from what you have read, and say in it what you could not see."
-    static final String LAST_REQUEST_NOTICE = "This is your last request: no tool you call now will run. Return the evidence JSON now from what you have read, and say in it what you could not check."
+    // DAR-BE-307: the notices the model reads (notice.SAME_AS_EARLIER, notice.REPEAT, notice.LAST_REQUEST) are AgentText, read from the role's config snapshot.
     static RoleResult run(def ec, RoleSpec spec, String pinnedTenantId, List<MessageParam> messages, ModelGateway gateway, String turnId) {
         return new AgentRoleLoop().runRole(ec, spec, pinnedTenantId, messages, gateway, turnId)
     }
@@ -212,7 +198,7 @@ class AgentRoleLoop {
                     if (times >= SAME_CALL_LIMIT) return finish(ec, pinnedTenantId, turnId, result, "LOOP")
                     if (times > 1 && AgentToolExecutor.isReadTool(use.name())) {
                         seen[key] = times
-                        answers << toolResult(use.id(), SAME_AS_EARLIER, false)
+                        answers << toolResult(use.id(), spec.config.text("notice.SAME_AS_EARLIER"), false)
                         repeated = true
                         continue
                     }
@@ -244,9 +230,9 @@ class AgentRoleLoop {
                 }
                 if (spec.role == RoleSpec.INVESTIGATOR && repeated) {
                     answerNow = true
-                    answers << ContentBlockParam.ofText(TextBlockParam.builder().text(REPEAT_NOTICE).build())
+                    answers << ContentBlockParam.ofText(TextBlockParam.builder().text(spec.config.text("notice.REPEAT")).build())
                 } else if (spec.role == RoleSpec.INVESTIGATOR && result.requestCount + 1 >= spec.maxRequests) {
-                    answers << ContentBlockParam.ofText(TextBlockParam.builder().text(LAST_REQUEST_NOTICE).build())
+                    answers << ContentBlockParam.ofText(TextBlockParam.builder().text(spec.config.text("notice.LAST_REQUEST")).build())
                 }
                 result.messages.add(MessageParam.ofUserOfContentBlockParams(answers))
                 continue
@@ -287,7 +273,7 @@ class AgentRoleLoop {
                 .systemOfTextBlockParams([TextBlockParam.builder().text(spec.systemPrompt)
                         .cacheControl(CacheControlEphemeral.builder().build()).build()])
                 .messages(messages)
-        if (spec.tools) b.tools(AgentToolExecutor.toolDefinitions(spec.tools).collect { ToolUnion.ofTool(it) })
+        if (spec.tools) b.tools(AgentToolExecutor.toolDefinitions(spec.tools, spec.config).collect { ToolUnion.ofTool(it) })
         // The tools stay listed (the cached prefix is unchanged); the model cannot call one on this request.
         if (spec.tools && noTools) b.toolChoice(ToolChoice.ofNone(ToolChoiceNone.builder().build()))
         // A request known to be the last writes no cache: nothing would read it.
