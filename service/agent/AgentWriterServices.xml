@@ -25,4 +25,22 @@
         </actions>
     </service>
 
+    <!-- DAR-BE-298. Core's account emails (darpan.email.EmailSmile.line) ask for this by name when it is defined. Internal
+         only: a send may run where no one is signed in. Nothing about the reader goes to the model. -->
+    <service verb="write" noun="EmailSmile" authenticate="anonymous-all" allow-remote="false" transaction="ignore">
+        <description>One playful line for a Darpan account email, by Claude Haiku from the key's brief and the template's own
+            line (darpan.agent.EmailSmileWriter). Empty when the deployment's agent switch is off, the key has no brief, or the
+            model gave nothing usable; core then sends the template's line, and checks any line again before it goes.</description>
+        <in-parameters>
+            <parameter name="key" required="true"><description>The EmailTemplate id (a side suffix for the recovery email)</description></parameter>
+            <parameter name="fallback"><description>The template's own line, given as the example</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="line"/>
+        </out-parameters>
+        <actions>
+            <set field="line" from="darpan.agent.EmailSmileWriter.write(ec, key, fallback)"/>
+        </actions>
+    </service>
+
 </services>
