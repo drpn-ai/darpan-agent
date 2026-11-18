@@ -64,6 +64,7 @@ class AgentToolExecutor {
             String key = name + "\u0000" + description
             Tool built = DEFINITIONS.get(key)
             if (built == null) {
+                // Racy check-then-clear: two threads may both clear or rebuild a tool; harmless, the result is the same.
                 if (DEFINITIONS.size() >= MAX_MEMO) DEFINITIONS.clear()
                 built = definition(t, description)
                 DEFINITIONS.put(key, built)

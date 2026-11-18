@@ -464,7 +464,7 @@ class AgentOrchestrator {
             if (rounds > turn.limits.maxEvidenceRounds + 1) {
                 // It was told no more rounds and asked again.
                 turn.outcome = "INCOMPLETE"
-                turn.replyParts << "I need more evidence than one message allows; tell me which finding or record to look at."
+                turn.replyParts << turn.cfg.text("reply.NEED_MORE_EVIDENCE")
                 return
             }
             String content

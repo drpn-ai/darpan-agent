@@ -230,6 +230,7 @@ class AgentConfigTests {
             "reply.NOT_STORED"            : "Your message could not be stored; nothing was changed. Try again.",
             "reply.FAILED"                : "Something went wrong on our side; nothing was changed.",
             "reply.FAILED_AFTER_DRAFTING" : "Something went wrong on our side after drafting {made}. A proposal changes nothing until a person approves it; nothing else was changed.",
+            "reply.NEED_MORE_EVIDENCE"    : "I need more evidence than one message allows; tell me which finding or record to look at.",
             "reply.OUT_OF_TIME"           : "I ran out of time for this message; ask again for the rest.",
             "reply.AGENT_UNAVAILABLE"     : "The agent cannot reach Claude right now; try again in a few minutes. Nothing was changed.",
             "reply.AGENT_OFF"             : "The AI agent is off for this tenant; a Darpan admin can turn it on. Nothing was changed.",
@@ -263,6 +264,21 @@ class AgentConfigTests {
         }
         assertEquals(expected, new TreeSet<>(AgentTextDefaults.TEXTS.keySet()))
         AgentTextDefaults.TEXTS.each { String id, String text -> assertNull(AgentTextDefaults.validTextError(id, text), "the default of ${id} is a valid text".toString()) }
+    }
+
+    @Test
+    @DisplayName("every catalogue tool builds a definition with its name, strict flag and schema")
+    void everyToolDefinitionBuilds() {
+        List<String> names = darpan.agent.loop.AgentToolExecutor.TOOLS.keySet() as List
+        def defs = darpan.agent.loop.AgentToolExecutor.toolDefinitions(names, AgentConfig.defaults())
+        assertEquals(15, defs.size())
+        assertEquals(names.toSorted(), defs*.name())
+        defs.each { d ->
+            Map t = darpan.agent.loop.AgentToolExecutor.TOOLS[d.name()]
+            assertEquals(t.strict != false, d.strict().orElse(false), d.name())
+            assertNotNull(d.inputSchema(), d.name())
+            assertEquals(t.description, d.description().orElse(null), d.name())
+        }
     }
 
     @Test

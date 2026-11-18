@@ -40,6 +40,7 @@ class AgentTextDefaults {
                 "reply.FAILED"                : "Something went wrong on our side; nothing was changed.",
                 "reply.FAILED_AFTER_DRAFTING" : "Something went wrong on our side after drafting {made}. A proposal changes nothing until a person approves it; nothing else was changed.",
                 "reply.OUT_OF_TIME"           : "I ran out of time for this message; ask again for the rest.",
+                "reply.NEED_MORE_EVIDENCE"    : "I need more evidence than one message allows; tell me which finding or record to look at.",
                 "reply.AGENT_REFUSED"         : "The agent is down for a fix on our side; Darpan staff have been alerted. Nothing was changed.",
                 "reply.AGENT_UNAVAILABLE"     : "The agent cannot reach Claude right now; try again in a few minutes. Nothing was changed.",
                 "reply.AGENT_OFF"             : "The AI agent is off for this tenant; a Darpan admin can turn it on. Nothing was changed.",
