@@ -1,0 +1,6 @@
+{
+  "settings": [
+    {"key": "darpan.agent.turnsPerUserPerHour", "type": "INT", "area": "Agent", "unit": "count", "description": "Agent turns one user may take per hour.", "defaultValue": "20", "min": 1, "max": 1000},
+    {"key": "darpan.agent.dailyUsdCapPerTenant", "type": "DECIMAL", "area": "Agent", "unit": "usd", "description": "Most the agent may spend for one tenant per day.", "defaultValue": "25", "min": 0.01, "max": 1000}
+  ]
+}
