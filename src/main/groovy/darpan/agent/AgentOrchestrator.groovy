@@ -7,6 +7,7 @@ import com.anthropic.models.messages.TextBlockParam
 import com.anthropic.models.messages.ToolResultBlockParam
 import darpan.agent.claude.AnthropicModelGateway
 import darpan.agent.claude.ModelGateway
+import darpan.agent.config.AgentLimits
 import darpan.agent.loop.AgentRoleLoop
 import darpan.agent.loop.AgentToolExecutor
 import darpan.agent.loop.AgentUsageLedger
@@ -58,8 +59,6 @@ class AgentOrchestrator {
     static final int MAX_EVIDENCE_ROUNDS = 2
     static final int MAX_TEXT_CHARS = 20_000
     static final int EARLIER_TURNS = 4
-    static final String TURNS_PER_HOUR_PROPERTY = "darpan.agent.turnsPerUserPerHour"
-    static final String DAILY_CAP_PROPERTY = "darpan.agent.dailyUsdCapPerTenant"
 
     static final String DECLINE = "That is outside what I can do here. I create and maintain this tenant's audit checks: setting up an audit, its statements and checks, why a finding is open or closed, and changes to their rules, exclusions, fix wording and causes. Ask about one of those."
     /** The reply when a turn would otherwise end with nothing for the person: never an empty answer. */
@@ -713,10 +712,10 @@ class AgentOrchestrator {
                 .condition("startedDate", EntityCondition.GREATER_THAN_EQUAL_TO, since).useCache(false).count()
     }
 
-    static int turnsPerHour() { return DarpanSettings.intValue(TURNS_PER_HOUR_PROPERTY) }
+    static int turnsPerHour() { return DarpanSettings.intValue(AgentLimits.TURNS_PER_USER_PER_HOUR) }
 
     /** The one read of the global daily cap (DAR-BE-307 wraps this for a per-tenant override). */
-    static BigDecimal dailyCapUsd() { return DarpanSettings.decimalValue(DAILY_CAP_PROPERTY) }
+    static BigDecimal dailyCapUsd() { return DarpanSettings.decimalValue(AgentLimits.DAILY_USD_CAP_PER_TENANT) }
 
     static boolean overDailyCap(def ec, String pinned) {
         return AgentUsageLedger.todayCostMicros(ec, pinned) >= (dailyCapUsd() * 1_000_000G).longValue()

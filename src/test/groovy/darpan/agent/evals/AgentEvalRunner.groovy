@@ -10,6 +10,7 @@ import darpan.agent.AgentRedaction
 import darpan.agent.AgentSwitch
 import darpan.agent.claude.AnthropicModelGateway
 import darpan.agent.claude.ModelGateway
+import darpan.agent.config.AgentLimits
 import darpan.agent.loop.AgentToolExecutor
 import darpan.agent.loop.AgentUsageLedger
 import darpan.agent.loop.RoleSpec
@@ -208,8 +209,8 @@ class AgentEvalRunner {
     /** The eval JVM's agent settings: switch on, no hourly limit in the way, and the budget as the tenant's daily cap. */
     static void configureAgent(BigDecimal budgetUsd) {
         System.setProperty(AgentSwitch.ENABLED_PROPERTY, "true")
-        System.setProperty(AgentOrchestrator.TURNS_PER_HOUR_PROPERTY, "1000")
-        System.setProperty(AgentOrchestrator.DAILY_CAP_PROPERTY, budgetUsd.toPlainString())
+        System.setProperty(AgentLimits.TURNS_PER_USER_PER_HOUR, "1000")
+        System.setProperty(AgentLimits.DAILY_USD_CAP_PER_TENANT, budgetUsd.toPlainString())
     }
 
     /** The synthetic tenant, its run and conclusion tree, the audit and the frozen findings with their records. */

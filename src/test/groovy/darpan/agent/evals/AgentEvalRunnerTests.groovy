@@ -5,6 +5,7 @@ import com.anthropic.models.messages.Message
 import darpan.agent.AgentOrchestrator
 import darpan.agent.AgentRedaction
 import darpan.agent.AgentSwitch
+import darpan.agent.config.AgentLimits
 import darpan.agent.loop.AgentRoleLoopTests
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
@@ -26,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.*
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AgentEvalRunnerTests {
 
-    private static final List<String> PROPERTIES = [AgentSwitch.ENABLED_PROPERTY, AgentOrchestrator.TURNS_PER_HOUR_PROPERTY, AgentOrchestrator.DAILY_CAP_PROPERTY]
+    private static final List<String> PROPERTIES = [AgentSwitch.ENABLED_PROPERTY, AgentLimits.TURNS_PER_USER_PER_HOUR, AgentLimits.DAILY_USD_CAP_PER_TENANT]
     private static final def MAPPER = ObjectMappers.jsonMapper()
 
     private ExecutionContext ec
