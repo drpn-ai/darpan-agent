@@ -20,8 +20,6 @@ import java.util.regex.Pattern
 class AgentConfigAdmin {
     static final int PROMPT_MAX_CHARS = 100_000
     static final int VERSIONS_SHOWN = 10
-    /** One side of a text edit in the audit row, so before and after together stay inside the detailText column. */
-    private static final int AUDIT_TEXT_SIDE = 1500
     private static final String WHY = "agent config admin: instance-wide agent config"
     private static final String SVC = "admin.AgentConfigAdminServices."
     private static final List<String> PRICE_FIELDS = ["inputUsdPerMTok", "outputUsdPerMTok", "cacheReadUsdPerMTok", "cacheWriteUsdPerMTok"]
@@ -60,20 +58,13 @@ class AgentConfigAdmin {
         Map row = row(ec, "darpan.agent.AgentPrompt", [promptId: promptId])
         Map base = promptSummary(promptId, cfg, row)
         List<Map> versions = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.agent.AgentPromptVersion", WHY).condition("promptId", promptId)
-                .useCache(false).list().collect { it.getMap() as Map }
-        // Newest first: the later change, and for one instant the later id.
-        versions = versions.sort(false) { Map v -> v.changedDate.time * 1_000_000L + sequence(v.promptVersionId) % 1_000_000L }.reverse()
+                .orderBy(["-changedDate", "-promptVersionId"]).limit(VERSIONS_SHOWN).useCache(false).list().collect { it.getMap() as Map }
         return [promptId: promptId, text: cfg.prompt(promptId), defaultText: defaultPrompt(promptId), edited: base.edited,
                 defaultChangedSinceEdit: base.defaultChangedSinceEdit,
-                versions: versions.take(VERSIONS_SHOWN).collect { Map v ->
+                versions: versions.collect { Map v ->
                     [promptVersionId: v.promptVersionId, text: v.promptText, changedByUserId: v.changedByUserId, changedDate: v.changedDate,
                      reset: v.promptText == null]
                 }]
-    }
-
-    private static long sequence(Object id) {
-        String digits = id?.toString()?.replaceAll(/\D/, "")
-        return digits ? Long.parseLong(digits.length() > 18 ? digits.substring(digits.length() - 18) : digits) : 0L
     }
 
     private static Map promptSummary(String id, AgentConfig cfg, Map row) {
@@ -117,8 +108,9 @@ class AgentConfigAdmin {
             ec.entity.makeValue("darpan.agent.AgentPrompt").setAll([promptId: promptId, promptText: promptText, defaultSha256: sha256(dflt),
                     lastChangedByUserId: ec.user.userId, lastChangedDate: ec.user.nowTimestamp]).createOrUpdate()
         }
-        version(ec, promptId, promptText)
-        AdminAuditSupport.record(ec, SVC + "update#AgentPrompt", "AgentPrompt", promptId, "Agent prompt ${promptId} edited (${promptText.length()} chars).".toString())
+        String versionId = version(ec, promptId, promptText)
+        AdminAuditSupport.record(ec, SVC + "update#AgentPrompt", "AgentPrompt", promptId,
+                "Agent prompt ${promptId} edited (${promptText.length()} chars; version ${versionId}).".toString())
         AgentConfig.expireAfterCommit(ec)
         return [prompt: promptDetail(ec, promptId)]
     }
@@ -132,9 +124,11 @@ class AgentConfigAdmin {
         return named == null ? null : "The prompt names tenant ${named}; agent prompts are shared by every tenant.".toString()
     }
 
-    private static void version(def ec, String promptId, String text) {
-        ec.entity.makeValue("darpan.agent.AgentPromptVersion").setAll([promptId: promptId, promptText: text, changedByUserId: ec.user.userId,
-                changedDate: ec.user.nowTimestamp]).setSequencedIdPrimary().create()
+    private static String version(def ec, String promptId, String text) {
+        def v = ec.entity.makeValue("darpan.agent.AgentPromptVersion").setAll([promptId: promptId, promptText: text, changedByUserId: ec.user.userId,
+                changedDate: ec.user.nowTimestamp]).setSequencedIdPrimary()
+        v.create()
+        return v.promptVersionId as String
     }
 
     // ------------------------------------------------------------------ role models and prices
@@ -149,8 +143,13 @@ class AgentConfigAdmin {
             if (AgentConfig.load(ec).price(model) == null) return [error: "Model ${model} has no price; add its price first.".toString()]
         }
         String was = AgentConfig.load(ec).model(roleId)
-        ec.entity.makeValue("darpan.agent.AgentRoleConfig").setAll([roleId: roleId, modelId: model, lastChangedByUserId: ec.user.userId,
-                lastChangedDate: ec.user.nowTimestamp]).createOrUpdate()
+        if (model == AgentConfigDefaults.ROLE_MODELS.get(roleId)) {
+            // The shipped model is no edit: drop any edit row, as a prompt does.
+            deleteRow(ec, "darpan.agent.AgentRoleConfig", [roleId: roleId])
+        } else {
+            ec.entity.makeValue("darpan.agent.AgentRoleConfig").setAll([roleId: roleId, modelId: model, lastChangedByUserId: ec.user.userId,
+                    lastChangedDate: ec.user.nowTimestamp]).createOrUpdate()
+        }
         AdminAuditSupport.record(ec, SVC + "update#AgentRoleModel", "AgentRoleConfig", roleId, "Agent model ${roleId} ${was} -> ${model}.".toString())
         AgentConfig.expireAfterCommit(ec)
         return [role: roleMap(AgentConfig.load(ec), roleId)]
@@ -158,9 +157,10 @@ class AgentConfigAdmin {
 
     static Map updateAgentModelPrice(def ec, String modelId, Object input, Object output, Object cacheRead, Object cacheWrite) {
         String model = modelId?.trim()
-        if (!AgentConfig.validModelId(model)) return [error: "${modelId} is not a model id.".toString()]
+        if (!AgentConfig.validModelId(model) || model == NONE) return [error: "${modelId} is not a model id.".toString()]
         List<BigDecimal> v = [input, output, cacheRead, cacheWrite].collect { decimal(it) }
-        if (v.any { it == null || it < 0G || it > MAX_PRICE } || v[0] <= 0G || v[1] <= 0G) {
+        // number-decimal keeps 6 places: a finer price would save as 0 and silently unprice the model.
+        if (v.any { it == null || it.stripTrailingZeros().scale() > 6 || it < 0G || it > MAX_PRICE } || v[0] <= 0G || v[1] <= 0G) {
             return [error: "Prices are dollars per million tokens: input and output above 0, cache prices 0 or more, none above 1000."]
         }
         AgentConfig cfg = AgentConfig.load(ec)
@@ -187,12 +187,10 @@ class AgentConfigAdmin {
         ec.entity.makeValue("darpan.agent.AgentText").setAll([textId: textId, textValue: text, defaultSha256: sha256(AgentTextDefaults.TEXTS.get(textId)),
                 lastChangedByUserId: ec.user.userId, lastChangedDate: ec.user.nowTimestamp]).createOrUpdate()
         AdminAuditSupport.record(ec, SVC + "update#AgentText", "AgentText", textId,
-                "Agent text ${textId}: \"${clip(was)}\" -> \"${clip(text)}\"".toString())
+                "Agent text ${textId}: \"${was}\" -> \"${text}\"".toString())
         AgentConfig.expireAfterCommit(ec)
         return [text: textMap(textId, AgentConfig.load(ec), row(ec, "darpan.agent.AgentText", [textId: textId]))]
     }
-
-    private static String clip(String s) { return s.length() <= AUDIT_TEXT_SIDE ? s : s.substring(0, AUDIT_TEXT_SIDE) + "..." }
 
     // ------------------------------------------------------------------ tenant caps
 
@@ -230,8 +228,8 @@ class AgentConfigAdmin {
         if (!AgentConfigDefaults.PROMPT_PATHS.containsKey(id)) return [error: unknown("prompt", id)]
         if (row(ec, "darpan.agent.AgentPrompt", [promptId: id]) != null) {
             deleteRow(ec, "darpan.agent.AgentPrompt", [promptId: id])
-            version(ec, id, null)
-            done(ec, "reset#AgentConfigItem", "AgentPrompt", id, "Agent prompt ${id} reset to the shipped default.")
+            String versionId = version(ec, id, null)
+            done(ec, "reset#AgentConfigItem", "AgentPrompt", id, "Agent prompt ${id} reset to the shipped default (version ${versionId}).")
         }
         return [reset: [kind: "PROMPT", id: id, edited: false]]
     }
@@ -266,7 +264,7 @@ class AgentConfigAdmin {
         Map existing = row(ec, "darpan.agent.AgentText", [textId: id])
         if (existing != null) {
             deleteRow(ec, "darpan.agent.AgentText", [textId: id])
-            done(ec, "reset#AgentConfigItem", "AgentText", id, "Agent text ${id}: \"${clip(existing.textValue as String)}\" -> default.")
+            done(ec, "reset#AgentConfigItem", "AgentText", id, "Agent text ${id}: \"${existing.textValue}\" -> default.")
         }
         return [reset: [kind: "TEXT", id: id, edited: false]]
     }

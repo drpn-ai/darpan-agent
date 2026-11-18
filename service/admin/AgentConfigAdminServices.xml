@@ -51,7 +51,7 @@
             it says.</description>
         <in-parameters>
             <parameter name="promptId" required="true"/>
-            <parameter name="promptText" required="true"/>
+            <parameter name="promptText" required="true" allow-html="any"/>
         </in-parameters>
         <out-parameters>
             <parameter name="prompt" type="Map"/>
@@ -109,7 +109,7 @@
             and stay within its length cap. The audit row carries the old and new words.</description>
         <in-parameters>
             <parameter name="textId" required="true"/>
-            <parameter name="text" required="true"/>
+            <parameter name="text" required="true" allow-html="any"/>
         </in-parameters>
         <out-parameters>
             <parameter name="text" type="Map"/>

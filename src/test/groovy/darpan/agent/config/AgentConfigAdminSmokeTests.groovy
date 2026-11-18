@@ -29,6 +29,8 @@ class AgentConfigAdminSmokeTests {
     private static final String SUPER_ID = "AGCA_SUPER"
     private static final String SUPER = "agca.super"
     private static final String EDITOR = "test.customer"
+    private static final String DADMIN_ID = "AGCA_DADMIN"
+    private static final String DADMIN = "agca.dadmin"
     private static final String TENANT = "AGCA_ACME"
     private static final String CAP_KEY = "darpan.agent.dailyUsdCapPerTenant"
     private static final Timestamp FROM = Timestamp.valueOf("2026-01-01 00:00:00")
@@ -46,6 +48,9 @@ class AgentConfigAdminSmokeTests {
             upsert("moqui.security.UserAccount", [userId: SUPER_ID, username: SUPER, userFullName: SUPER, emailAddress: "agca.super@example.com",
                     disabled: "N", requirePasswordChange: "N"])
             upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_SUPER_ADMIN", userId: SUPER_ID, fromDate: FROM])
+            upsert("moqui.security.UserAccount", [userId: DADMIN_ID, username: DADMIN, userFullName: DADMIN, emailAddress: "agca.dadmin@example.com",
+                    disabled: "N", requirePasswordChange: "N"])
+            upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_ADMIN", userId: DADMIN_ID, fromDate: FROM])
             upsert("moqui.security.UserGroup", [userGroupId: TENANT, description: "Acme", groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
             upsert("darpan.auth.TenantSetting", [companyUserGroupId: TENANT, timeZone: "UTC", disabled: "N"])
         }
@@ -126,7 +131,7 @@ class AgentConfigAdminSmokeTests {
         assertEquals([false], versions*.reset)
         Map c = ok(svc("get#AgentConfig", [:])).result.config
         assertEquals([true, text.length(), SUPER_ID], c.prompts.find { it.promptId == "router" }.with { [it.edited, it.chars, it.lastChangedByUserId] })
-        assertEquals(["Agent prompt router edited (${text.length()} chars).".toString()], audit()*.detailText)
+        assertEquals(["Agent prompt router edited (${text.length()} chars; version ${versions[0].promptVersionId}).".toString()], audit()*.detailText)
         assertEquals([S + "update#AgentPrompt", "AgentPrompt", "router"], [audit()[0].serviceName, audit()[0].targetType, audit()[0].targetId])
         assertFalse(audit()[0].detailText.contains("Pick one route"), "the audit row never carries the prompt text")
 
@@ -141,6 +146,7 @@ class AgentConfigAdminSmokeTests {
         assertNull(after.versions[0].text)
         assertEquals(3, audit().size())
         assertEquals(S + "reset#AgentConfigItem", audit()[2].serviceName)
+        assertEquals("Agent prompt router reset to the shipped default (version ${after.versions[0].promptVersionId}).".toString(), audit()[2].detailText)
     }
 
     @Test
@@ -170,6 +176,18 @@ class AgentConfigAdminSmokeTests {
         assertTrue(svc("update#AgentPrompt", [promptId: "router", promptText: "a" * 100_001]).errors
                 .contains("The prompt is longer than 100000 characters."))
         assertEquals(1L, count("darpan.agent.AgentPrompt"), "only the one valid edit")
+    }
+
+    @Test
+    @DisplayName("prompts with tags save: every default unchanged, and an edit keeping <facts>")
+    void taggedPromptsSave() {
+        AgentConfigDefaults.PROMPT_PATHS.each { String id, String path ->
+            ok(svc("update#AgentPrompt", [promptId: id, promptText: AgentConfigDefaults.classpathText(path)]))
+        }
+        String words = AgentConfigDefaults.classpathText("darpan/agent/prompts/audit-run-words.md")
+        assertTrue(words.contains("<facts>"))
+        ok(svc("update#AgentPrompt", [promptId: "audit-run-words", promptText: words + "\nBe brief. <facts> stay.".toString()]))
+        assertTrue(AgentConfig.current(ec).prompt("audit-run-words").contains("<facts> stay."))
     }
 
     // ------------------------------------------------------------------ models and prices
@@ -207,6 +225,20 @@ class AgentConfigAdminSmokeTests {
         assertEquals("claude-sonnet-5-5", AgentConfig.current(ec).model("AUTHOR"))
         ok(svc("reset#AgentConfigItem", [kind: "PRICE", id: "claude-sonnet-5-5"]))
         assertEquals(0, new BigDecimal("2.0").compareTo(AgentConfig.current(ec).price("claude-sonnet-5-5").input))
+    }
+
+    @Test
+    @DisplayName("saving a role's default model stores no edit; fine prices and none as a price id are refused")
+    void defaultModelAndPriceEdges() {
+        ok(svc("update#AgentRoleModel", [roleId: "AUTHOR", modelId: "claude-opus-5-5"]))
+        Map back = ok(svc("update#AgentRoleModel", [roleId: "AUTHOR", modelId: "claude-sonnet-5-5"])).result.role
+        assertFalse(back.edited as boolean)
+        assertEquals(0L, count("darpan.agent.AgentRoleConfig"))
+        Map fine = [modelId: "claude-new-9", inputUsdPerMTok: "0.0000001", outputUsdPerMTok: 2, cacheReadUsdPerMTok: 0, cacheWriteUsdPerMTok: 1]
+        assertTrue(svc("update#AgentModelPrice", fine).hasError)
+        assertTrue(svc("update#AgentModelPrice", fine + [modelId: "none", inputUsdPerMTok: 1]).errors.contains("none is not a model id."))
+        assertEquals(0L, count("darpan.agent.AgentModelPrice"))
+        ok(svc("update#AgentModelPrice", fine + [inputUsdPerMTok: "0.000001"]))
     }
 
     @Test
@@ -257,7 +289,7 @@ class AgentConfigAdminSmokeTests {
     void textEditRules() {
         String id = "reply.RATE_LIMITED"
         assertFalse(svc("update#AgentText", [textId: id, text: "Slow down."]).errors.isEmpty(), "missing {count}")
-        assertFalse(svc("update#AgentText", [textId: id, text: "<b>{count}</b> sent."]).errors.isEmpty(), "markup")
+        assertTrue(svc("update#AgentText", [textId: id, text: "<b>{count}</b> sent."]).errors.contains("Plain text only: no markup."), "markup")
         assertTrue(svc("update#AgentText", [textId: "reply.NOPE", text: "x"]).errors.contains("Unknown agent text reply.NOPE."))
         assertEquals(0L, count("darpan.agent.AgentText"))
         assertEquals(AgentTextDefaults.validTextError(id, "Slow down."), svc("update#AgentText", [textId: id, text: "Slow down."]).errors[0])
@@ -319,10 +351,12 @@ class AgentConfigAdminSmokeTests {
                 tenantUserGroupId: TENANT, dailyUsdCap: "1", inputUsdPerMTok: 1, outputUsdPerMTok: 1, cacheReadUsdPerMTok: 0, cacheWriteUsdPerMTok: 0,
                 kind: "PROMPT", id: "router"]
         METHODS.each { String m ->
-            Map fenced = svc(m, params, EDITOR)
-            assertNotNull(fenced.authzDenied, "${m}: the admin fence must refuse")
-            Map gated = svc(m, params, EDITOR, true)
-            assertTrue(gated.errors.contains("This operation requires super-admin access."), "${m}: ${gated.errors}")
+            [EDITOR, DADMIN].each { String who ->
+                Map fenced = svc(m, params, who)
+                assertNotNull(fenced.authzDenied, "${who} ${m}: the admin fence must refuse")
+                Map gated = svc(m, params, who, true)
+                assertTrue(gated.errors.contains("This operation requires super-admin access."), "${who} ${m}: ${gated.errors}")
+            }
         }
         ENTITIES_WRITTEN.each { assertEquals(0L, count(it), it) }
         assertEquals([], audit())
