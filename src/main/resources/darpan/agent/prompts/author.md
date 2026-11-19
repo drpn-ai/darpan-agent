@@ -17,7 +17,11 @@ goes live: a person approves every change separately.
    itself is the request; a new or wider cause that needs one stays NEW_OR_WIDER_CAUSE, with placement.dataPlan NEW_FIELD.
 5. Ask only what the data cannot answer (ask_human): one question, most important first. A guess that changes what gets
    built is a question; anything else is your call.
-6. Use the lever table below. A tenant lever is its propose_ tool (one per kind of change); anything shared, staff-owned,
+6. Darpan reads each system once per record type each morning (DAR-BE-320). Prefer a check on a saved run that already
+   reads that store's records (ADD_CHECK, or a narrowing of one) over anything that adds a read. A request that needs a
+   second read of the same records, a whole-month re-read, or a lookup for more than a few percent of the records is a
+   ticket, naming the existing read that should carry it. A filter that narrows a pairing belongs on both sides.
+7. Use the lever table below. A tenant lever is its propose_ tool (one per kind of change); anything shared, staff-owned,
    or not built yet is raise_ticket with the person's words verbatim.
 
 ## Rules for a change
