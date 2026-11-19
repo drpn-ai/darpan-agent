@@ -28,6 +28,8 @@ class AgentLimitsTests {
             ["emailSmileTimeoutMs", "4000", 1000, 10000, "ms"], ["emailSmileMaxTokens", "200", 50, 2000, "tokens"],
             ["auditRunWordsTimeoutMs", "60000", 5000, 300000, "ms"], ["auditRunWordsMaxTokens", "8000", 1000, 64000, "tokens"],
             ["auditRunWordsHeadlineMaxChars", "400", 50, 2000, "chars"], ["auditRunWordsFixMaxChars", "300", 50, 2000, "chars"],
+            ["auditReadReviewTimeoutMs", "60000", 5000, 300000, "ms"], ["auditReadReviewMaxTokens", "8000", 1000, 64000, "tokens"],
+            ["auditReadReviewTextMaxChars", "600", 100, 4000, "chars"],
             ["gatewayConnectTimeoutMs", "10000", 1000, 60000, "ms"], ["gatewayReadIdleTimeoutMs", "30000", 5000, 300000, "ms"],
             ["requestMaxRetries", "2", 0, 5, "count"], ["retryBackoffBaseMs", "500", 100, 10000, "ms"], ["retryBackoffMaxMs", "8000", 500, 60000, "ms"],
             ["minConfidence", "0.6", 0, 1, "factor"],
@@ -60,8 +62,8 @@ class AgentLimitsTests {
     @DisplayName("the agent catalog parses, every default is valid and equals today's code value")
     void theAgentCatalogParsesAndDefaultsAreToday() {
         Map<String, SettingDefinition> cat = agentCatalog()
-        assertEquals(TABLE.collect { keyOf(it[0] as String) } as Set, cat.keySet(), "exactly the 33 keys")
-        assertEquals(33, cat.size())
+        assertEquals(TABLE.collect { keyOf(it[0] as String) } as Set, cat.keySet(), "exactly the 36 keys")
+        assertEquals(36, cat.size())
         TABLE.each { List row ->
             SettingDefinition d = cat[keyOf(row[0] as String)]
             assertTrue(d.area.startsWith("Agent"), "area of ${d.key}: ${d.area}")

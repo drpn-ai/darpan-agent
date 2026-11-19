@@ -36,6 +36,9 @@ class AgentLimits {
     static final String AUDIT_RUN_WORDS_MAX_TOKENS = "darpan.agent.auditRunWordsMaxTokens"
     static final String AUDIT_RUN_WORDS_HEADLINE_MAX_CHARS = "darpan.agent.auditRunWordsHeadlineMaxChars"
     static final String AUDIT_RUN_WORDS_FIX_MAX_CHARS = "darpan.agent.auditRunWordsFixMaxChars"
+    static final String AUDIT_READ_REVIEW_TIMEOUT_MS = "darpan.agent.auditReadReviewTimeoutMs"
+    static final String AUDIT_READ_REVIEW_MAX_TOKENS = "darpan.agent.auditReadReviewMaxTokens"
+    static final String AUDIT_READ_REVIEW_TEXT_MAX_CHARS = "darpan.agent.auditReadReviewTextMaxChars"
     static final String GATEWAY_CONNECT_TIMEOUT_MS = "darpan.agent.gatewayConnectTimeoutMs"
     static final String GATEWAY_READ_IDLE_TIMEOUT_MS = "darpan.agent.gatewayReadIdleTimeoutMs"
     static final String REQUEST_MAX_RETRIES = "darpan.agent.requestMaxRetries"
@@ -70,6 +73,9 @@ class AgentLimits {
     int auditRunWordsMaxTokens
     int auditRunWordsHeadlineMaxChars
     int auditRunWordsFixMaxChars
+    int auditReadReviewTimeoutMs
+    int auditReadReviewMaxTokens
+    int auditReadReviewTextMaxChars
     int gatewayConnectTimeoutMs
     int gatewayReadIdleTimeoutMs
     int requestMaxRetries
@@ -114,6 +120,9 @@ class AgentLimits {
                 auditRunWordsMaxTokens: DarpanSettings.intValue(AUDIT_RUN_WORDS_MAX_TOKENS),
                 auditRunWordsHeadlineMaxChars: DarpanSettings.intValue(AUDIT_RUN_WORDS_HEADLINE_MAX_CHARS),
                 auditRunWordsFixMaxChars: DarpanSettings.intValue(AUDIT_RUN_WORDS_FIX_MAX_CHARS),
+                auditReadReviewTimeoutMs: DarpanSettings.intValue(AUDIT_READ_REVIEW_TIMEOUT_MS),
+                auditReadReviewMaxTokens: DarpanSettings.intValue(AUDIT_READ_REVIEW_MAX_TOKENS),
+                auditReadReviewTextMaxChars: DarpanSettings.intValue(AUDIT_READ_REVIEW_TEXT_MAX_CHARS),
                 gatewayConnectTimeoutMs: DarpanSettings.intValue(GATEWAY_CONNECT_TIMEOUT_MS),
                 gatewayReadIdleTimeoutMs: DarpanSettings.intValue(GATEWAY_READ_IDLE_TIMEOUT_MS),
                 requestMaxRetries: DarpanSettings.intValue(REQUEST_MAX_RETRIES),

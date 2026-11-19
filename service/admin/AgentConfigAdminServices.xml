@@ -65,7 +65,7 @@
     </service>
 
     <service verb="update" noun="AgentRoleModel" allow-remote="true" authenticate="true">
-        <description>Points a role (ROUTER, INVESTIGATOR, AUTHOR, AUTHOR_ESCALATION, EMAIL_SMILE, AUDIT_RUN_WORDS) at a model. Refused:
+        <description>Points a role (ROUTER, INVESTIGATOR, AUTHOR, AUTHOR_ESCALATION, EMAIL_SMILE, AUDIT_RUN_WORDS, AUDIT_READ_REVIEW) at a model. Refused:
             an unknown role, a malformed model id, a model with no price, and none for any role but AUTHOR_ESCALATION. The next turn
             re-checks the model with the provider.</description>
         <in-parameters>

@@ -25,6 +25,28 @@
         </actions>
     </service>
 
+    <!-- DAR-BE-320 phase 1b. Core's audit run update (darpan.audit.AuditRunUpdateSupport.reviewReads) asks for this by name
+         when it is defined and the play's read report has flags. Internal only: runs after an automation run. -->
+    <service verb="review" noun="AuditReads" authenticate="anonymous-all" allow-remote="false" transaction="ignore">
+        <description>One staff ticket per tenant, read flag and connection (BrainChangeTicket, READ_ECONOMY_EXTRACT or
+            READ_ECONOMY_BRAIN) from a play's read report, with Claude's diagnosis, suggestion and owner when the agent is on for
+            the tenant (darpan.agent.AuditReadReviewer). A flag with an open ticket is not raised again. Never changes config or code.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="auditId"/>
+            <parameter name="readReport" type="Map" required="true"><description>darpan.audit.AuditReadReport.forPlay</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="tickets" type="List"><description>[{ticketId, flag, key, duplicate}]</description></parameter>
+            <parameter name="reviewed" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="darpan.agent.AuditReadReviewer.review(ec, companyUserGroupId, auditId, readReport)"/>
+            <set field="tickets" from="out.tickets"/>
+            <set field="reviewed" from="out.reviewed"/>
+        </actions>
+    </service>
+
     <!-- DAR-BE-298. Core's account emails (darpan.email.EmailSmile.line) ask for this by name when it is defined. Internal
          only: a send may run where no one is signed in. Nothing about the reader goes to the model. -->
     <service verb="write" noun="EmailSmile" authenticate="anonymous-all" allow-remote="false" transaction="ignore">

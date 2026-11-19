@@ -13,12 +13,14 @@ class AgentConfigDefaults {
     static final String AUTHOR_ESCALATION = "AUTHOR_ESCALATION"
     static final String EMAIL_SMILE = "EMAIL_SMILE"
     static final String AUDIT_RUN_WORDS = "AUDIT_RUN_WORDS"
+    static final String AUDIT_READ_REVIEW = "AUDIT_READ_REVIEW"
     /** The roles that run as a turn (the preflight and the daily cap care about these). */
     static final List<String> TURN_ROLES = [ROUTER, INVESTIGATOR, AUTHOR, AUTHOR_ESCALATION].asImmutable()
 
     static final Map<String, String> ROLE_MODELS = [
             (ROUTER): "claude-sonnet-5-5", (INVESTIGATOR): "claude-sonnet-5-5", (AUTHOR): "claude-sonnet-5-5",
-            (AUTHOR_ESCALATION): "claude-opus-5-5", (EMAIL_SMILE): "claude-haiku-5-5", (AUDIT_RUN_WORDS): "claude-haiku-5-5"].asImmutable()
+            (AUTHOR_ESCALATION): "claude-opus-5-5", (EMAIL_SMILE): "claude-haiku-5-5", (AUDIT_RUN_WORDS): "claude-haiku-5-5",
+            (AUDIT_READ_REVIEW): "claude-haiku-5-5"].asImmutable()
 
     /** Dollars per million tokens: input, output, cache read, cache write (the 5-minute write, 1.25 x input, written out). */
     static final Map<String, ModelPrice> PRICES = [
@@ -29,7 +31,8 @@ class AgentConfigDefaults {
     static final Map<String, String> PROMPT_PATHS = [
             "router": "darpan/agent/prompts/router.md", "investigator": "darpan/agent/prompts/investigator.md",
             "author": "darpan/agent/prompts/author.md", "email-smile": "darpan/agent/prompts/email-smile.md",
-            "audit-run-words": "darpan/agent/prompts/audit-run-words.md"].asImmutable()
+            "audit-run-words": "darpan/agent/prompts/audit-run-words.md",
+            "audit-read-review": "darpan/agent/prompts/audit-read-review.md"].asImmutable()
 
     private static final Map<String, String> TEXTS = new ConcurrentHashMap<>()
 
