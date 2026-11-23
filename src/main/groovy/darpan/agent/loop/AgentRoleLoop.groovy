@@ -220,7 +220,7 @@ class AgentRoleLoop {
                     // content is the full result (the transcript's); the model reads modelContent when the executor projected it.
                     String shown = (done.modelContent ?: done.content) as String
                     result.toolCalls << [name: use.name(), input: input, isError: done.isError as boolean, content: done.content,
-                                         modelContent: shown, toolUseId: use.id()]
+                                         modelContent: shown, toolUseId: use.id(), full: done.full]
                     answers << toolResult(use.id(), shown, done.isError as boolean)
                 }
                 if (control != null) {

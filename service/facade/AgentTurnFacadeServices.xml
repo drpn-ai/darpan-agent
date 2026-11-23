@@ -49,6 +49,8 @@
         <in-parameters>
             <parameter name="conversationId"><description>Continue this query conversation; empty starts one.</description></parameter>
             <parameter name="text" required="true" allow-html="any"/>
+            <parameter name="readSpecJson" allow-html="any"><description>The read on the page now, so the agent builds on the person's edits.</description></parameter>
+            <parameter name="scriptBody" allow-html="any"><description>The script on the page now.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="conversationId"/>
@@ -59,7 +61,7 @@
             <parameter name="masked" type="List"><description>The kinds of secret or personal data masked in the text (never the values).</description></parameter>
         </out-parameters>
         <actions>
-            <set field="turn" from="darpan.agent.AgentOrchestrator.forRequest(ec).sendQuery(ec, conversationId, text)"/>
+            <set field="turn" from="darpan.agent.AgentOrchestrator.forRequest(ec).sendQuery(ec, conversationId, text, readSpecJson, scriptBody)"/>
             <if condition="turn == null || ec.message.hasError()"><return error="true"/></if>
             <set field="conversationId" from="turn.conversationId"/>
             <set field="outcome" from="turn.outcome"/>

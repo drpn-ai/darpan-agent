@@ -54,6 +54,23 @@ class ProposeQueryTests {
     }
 
     @Test
+    void aProposalPastTheResultCapIsStillTheTurnsAndReadsAsRun() {
+        String big = JsonOutput.toJson([status: "PROPOSED", proposal: [queryName: "Wide"], preview: [ok: true, readCounts: [orders: 5],
+                files: [[name: "w.csv", columns: ["x"], rowCount: 20, previewRows: (1..20).collect { ["v" * 4000] }]]]])
+        assertTrue(big.length() > AgentToolExecutor.MAX_RESULT_CHARS)
+        String capped = big.take(AgentToolExecutor.MAX_RESULT_CHARS) + " [cut]"
+        assertEquals("Wide", AgentOrchestrator.lastQueryProposal([[name: "propose_query", isError: false, content: capped, full: big]]).proposal.queryName)
+        assertEquals("PROPOSED", ((Map) new JsonSlurper().parseText(AgentToolExecutor.queryView("propose_query", false, big))).status)
+    }
+
+    @Test
+    void aFieldWithSpacesReachesTheModel() {
+        Map v = (Map) new JsonSlurper().parseText(AgentToolExecutor.queryView("get_query_catalog", false, JsonOutput.toJson([
+                datasets: [[datasetId: "DS_1", fields: ["Order Number", "id", "x<y"]]]])))
+        assertEquals(["Order Number", "id"], v.datasets[0].fields)
+    }
+
+    @Test
     void theTurnsProposalIsTheLastThatRan() {
         List<Map> calls = [
                 [name: "propose_query", isError: false, content: JsonOutput.toJson([status: "PROPOSED", proposal: [queryName: "First"], preview: [ok: true]])],

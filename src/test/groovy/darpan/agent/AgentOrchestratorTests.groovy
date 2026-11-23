@@ -1221,6 +1221,28 @@ class AgentOrchestratorTests {
     }
 
     @Test
+    void theAgentSeesThePagesDraftSoItKeepsTheEdits() {
+        def g = new AgentRoleLoopTests.ScriptedGateway([authorEnds("Added the total.")])
+        Map out = new AgentOrchestrator(g, AVAILABLE).sendQuery(ec, null, "also add the total", '{"inputs":[]}', "{'summary': 'my edit 7Q'}")
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertEquals("DONE", out.outcome)
+        String sent = sentJson(g, 0)
+        assertTrue(sent.contains("my edit 7Q") && sent.contains("<<<SCRIPT"), sent.take(2000))
+    }
+
+    @Test
+    void anAuditConversationNeverContinuesAsAQueryOne() {
+        List<Map> facts = [fact("findingId", FINDING, "TOOL"), fact("state", "OPEN", "TOOL")]
+        def g = new AgentRoleLoopTests.ScriptedGateway([router([item("EXPLAIN", "Why is this one open?", 0.9, [FINDING])]),
+                evidence(facts, "${FINDING} is open: its state is OPEN.".toString())])
+        Map audit = send(new AgentOrchestrator(g, AVAILABLE), "Why is this one open?")
+        Map query = new AgentOrchestrator(new AgentRoleLoopTests.ScriptedGateway([]), AVAILABLE).sendQuery(ec, audit.conversationId as String, "count them")
+        assertNull(query)
+        assertTrue(ec.message.errorsString.contains("was not found"), ec.message.errorsString)
+        ec.message.clearErrors()
+    }
+
+    @Test
     void aQueryConversationNeverContinuesAsAnAuditOne() {
         def g = new AgentRoleLoopTests.ScriptedGateway([authorEnds("Which audit's findings do you mean?")])
         Map out = new AgentOrchestrator(g, AVAILABLE).sendQuery(ec, null, "Count my findings")

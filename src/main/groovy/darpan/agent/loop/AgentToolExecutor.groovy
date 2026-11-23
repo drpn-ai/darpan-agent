@@ -105,14 +105,17 @@ class AgentToolExecutor {
                     return [isError: true, content: TOOL_FAILED]
                 }
                 if (ec.message.hasError()) return [isError: true, content: cap("ERROR: " + ec.message.getErrorsString())]
-                return [isError: false, content: cap(JsonOutput.toJson(out ?: [:]))]
+                String full = JsonOutput.toJson(out ?: [:])
+                return [isError: false, content: cap(full), full: full]
             } finally {
                 ec.message.clearErrors()
                 ec.message.popErrors()
             }
         }
         if (spec.role == RoleSpec.AUTHOR) done.modelContent = authorView(toolName, done.isError as boolean, done.content as String)
-        if (spec.role == RoleSpec.QUERY_AUTHOR) done.modelContent = queryView(toolName, done.isError as boolean, done.content as String)
+        // DAR-BE-334: the query author's view and the turn's proposal read the whole result; the transcript keeps the capped one
+        if (spec.role == RoleSpec.QUERY_AUTHOR) done.modelContent = queryView(toolName, done.isError as boolean, (done.full ?: done.content) as String)
+        if (toolName != "propose_query") done.remove("full")
         return done
     }
 
@@ -153,7 +156,7 @@ class AgentToolExecutor {
         try { out = new groovy.json.JsonSlurper().parseText(content ?: "") } catch (Exception ignored) { out = null }
         if (!(out instanceof Map)) return TOOL_ERROR
         Map o = (Map) out
-        Closure<List> fields = { Object v -> v instanceof List ? ((List) v).collect { token(it) }.findAll { it } : null }
+        Closure<List> fields = { Object v -> v instanceof List ? ((List) v).collect { fieldName(it) }.findAll { it } : null }
         if (toolName == "get_query_catalog") {
             return JsonOutput.toJson([
                     datasets : ((o.datasets ?: []) as List<Map>).collect { Map d -> [datasetId: token(d.datasetId), system: label(d.system),
@@ -173,6 +176,12 @@ class AgentToolExecutor {
                     error: err == null ? null : [kind: token(err.kind), line: err.line instanceof Number ? err.line : null]])
         }
         return TOOL_ERROR
+    }
+
+    /** A field name for the model: a token, or one with spaces (a CSV header such as "Order Number"), at most 64 characters. */
+    private static String fieldName(Object v) {
+        String s = v?.toString()
+        return s != null && s ==~ /[A-Za-z0-9_\-. ]{1,64}/ && s.trim() ? s : null
     }
 
     /** A config name for the model: letters, digits, spaces and simple punctuation only, at most 80 characters. */

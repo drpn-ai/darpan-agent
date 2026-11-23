@@ -123,11 +123,12 @@ class AgentOrchestrator {
      * access grant, rate and budget caps, masking), no audit, and one role (RoleSpec.queryAuthor) that reads the tenant's
      * query catalog and proposes a query that has already run; nothing is saved until the person saves it.
      */
-    Map sendQuery(def ec, String conversationId, String text) {
-        return sendTurn(ec, conversationId, null, null, text, null, true)
+    Map sendQuery(def ec, String conversationId, String text, String readSpecJson = null, String scriptBody = null) {
+        return sendTurn(ec, conversationId, null, null, text, null, true, [readSpecJson: readSpecJson, scriptBody: scriptBody])
     }
 
-    private Map sendTurn(def ec, String conversationId, String auditId, String findingId, String text, String auditCode, boolean query) {
+    private Map sendTurn(def ec, String conversationId, String auditId, String findingId, String text, String auditCode, boolean query,
+                         Map draft = null) {
         // DAR-BE-307: one config and one limits snapshot for the whole turn, taken first and never inside a lock; every check
         // and role below (availability included) reads from these two, so an edit made mid-turn waits for the next turn.
         AgentConfig cfg = AgentConfig.current(ec)
@@ -173,7 +174,7 @@ class AgentOrchestrator {
 
         Map scrubbed = PasteScrubber.scrub(text)
         Turn turn = new Turn(ec: ec, pinned: pinned, userId: userId, grantId: access.grantId as String, auditId: auditId, auditCode: audit?.auditCode as String, findingId: findingId, query: query,
-                words: scrubbed.text as String, masked: (List<String>) scrubbed.masked, deadline: clock.call() + lim.turnWallClockMs, cfg: cfg, limits: lim)
+                words: scrubbed.text as String, masked: (List<String>) scrubbed.masked, draft: query ? scrubDraft(draft) : null, deadline: clock.call() + lim.turnWallClockMs, cfg: cfg, limits: lim)
         boolean fresh = conversation == null
         turn.conversationId = fresh ? TenantScopedFinder.mintId(ec, "darpan.agent.AgentConversation", "conversationId") : conversationId
         turn.transcript = transcriptFor(ec, pinned, turn.conversationId)
@@ -340,6 +341,11 @@ class AgentOrchestrator {
         }
         if (turn.lastQuestion) b << "The last question asked of them: " << questionFor(turn.lastQuestion, [RoleSpec.QUERY_AUTHOR]) << "\n"
         b << "\nThe person's words, verbatim:\n<<<MESSAGE\n" << turn.words << "\nMESSAGE>>>\n"
+        if (turn.draft?.readSpecJson || turn.draft?.scriptBody) {
+            // The person's own draft (they may have edited it by hand): build on it rather than starting again.
+            b << "\nThe query on the page now, as the person left it:\n<<<READ\n" << (turn.draft.readSpecJson ?: "") << "\nREAD>>>\n"
+            b << "<<<SCRIPT\n" << (turn.draft.scriptBody ?: "") << "\nSCRIPT>>>\n"
+        }
         RoleResult r = role(turn, RoleSpec.queryAuthor(turn.cfg, turn.limits), [MessageParam.ofUser(b.toString())])
         turn.queryProposal = lastQueryProposal(r.toolCalls)
         if (r.outcome == "DONE") {
@@ -353,13 +359,25 @@ class AgentOrchestrator {
         }
     }
 
+    /** The page's draft, masked like the message and cut to 8,000 characters a part. */
+    private static Map scrubDraft(Map draft) {
+        if (!draft) return null
+        Closure<String> part = { Object v ->
+            String s = v?.toString()
+            if (!s?.trim()) return null
+            String masked = PasteScrubber.scrub(s).text as String
+            return masked.length() > 8_000 ? masked.take(8_000) : masked
+        }
+        return [readSpecJson: part(draft.readSpecJson), scriptBody: part(draft.scriptBody)]
+    }
+
     /** The last propose_query call that ran (status PROPOSED): {proposal, preview}; null when none did. */
     static Map lastQueryProposal(List<Map> toolCalls) {
         Map found = null
         (toolCalls ?: []).each { Map call ->
             if (call.name != "propose_query" || call.isError) return
             Object out
-            try { out = new groovy.json.JsonSlurper().parseText((call.content ?: "") as String) } catch (Exception ignored) { out = null }
+            try { out = new groovy.json.JsonSlurper().parseText((call.full ?: call.content ?: "") as String) } catch (Exception ignored) { out = null }
             if (out instanceof Map && ((Map) out).status == "PROPOSED") found = [proposal: ((Map) out).proposal, preview: ((Map) out).preview]
         }
         return found
@@ -969,6 +987,8 @@ class AgentOrchestrator {
         /** DAR-BE-334: a turn from the queries page, and the query it proposed ({proposal, preview}) or null. */
         boolean query
         Map queryProposal
+        /** The query on the page when the person asked ({readSpecJson, scriptBody}, masked), or null. */
+        Map draft
         /** The conversation's proposal and ticket ids before this turn's roles ran. */
         Map<String, List<String>> priorIds = [proposals: [], tickets: []]
         /** The typed facts the turn ended with, or null when it investigated nothing. */
