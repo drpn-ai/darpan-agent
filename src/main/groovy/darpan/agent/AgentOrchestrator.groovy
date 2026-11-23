@@ -115,6 +115,19 @@ class AgentOrchestrator {
      * text). DAR-BE-292: only an editor or tenant admin talks to the agent, so every draft it makes can be planned at once.
      */
     Map send(def ec, String conversationId, String auditId, String findingId, String text, String auditCode = null) {
+        return sendTurn(ec, conversationId, auditId, findingId, text, auditCode, false)
+    }
+
+    /**
+     * DAR-BE-334. One message from the queries page: the same gates as an audit turn (switch, pricing, write access, AI
+     * access grant, rate and budget caps, masking), no audit, and one role (RoleSpec.queryAuthor) that reads the tenant's
+     * query catalog and proposes a query that has already run; nothing is saved until the person saves it.
+     */
+    Map sendQuery(def ec, String conversationId, String text) {
+        return sendTurn(ec, conversationId, null, null, text, null, true)
+    }
+
+    private Map sendTurn(def ec, String conversationId, String auditId, String findingId, String text, String auditCode, boolean query) {
         // DAR-BE-307: one config and one limits snapshot for the whole turn, taken first and never inside a lock; every check
         // and role below (availability included) reads from these two, so an edit made mid-turn waits for the next turn.
         AgentConfig cfg = AgentConfig.current(ec)
@@ -130,19 +143,23 @@ class AgentOrchestrator {
         if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Only editors and tenant admins can talk to the agent.")) return null
         if (!text?.trim()) { ec.message.addError("Say what you want to know or change."); return null }
         if (text.length() > lim.maxMessageChars) { ec.message.addError("The message is longer than ${lim.maxMessageChars} characters; send it in parts.".toString()); return null }
-        if (!auditId == !auditCode) { ec.message.addError("Name the audit by its id or by its code, not both."); return null }
-        def audit = auditId ? TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.Audit", "auditId", auditId, pinned, WHY)
-                : TenantScopedFinder.findTenantScoped(ec, "darpan.audit.Audit").condition("auditCode", auditCode).useCache(false).one()
-        if (audit == null || audit.companyUserGroupId != pinned) { ec.message.addError("Audit ${auditId ?: auditCode} was not found.".toString()); return null }
-        // DAR-UI-104: the audit page names its audit by code; everything below keys on the row id.
-        auditId = audit.auditId as String
-        if (findingId && !findingOfAudit(ec, pinned, auditId, findingId)) {
-            ec.message.addError("Finding ${findingId} was not found in audit ${auditId}.".toString()); return null
+        def audit = null
+        if (!query) {
+            if (!auditId == !auditCode) { ec.message.addError("Name the audit by its id or by its code, not both."); return null }
+            audit = auditId ? TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.Audit", "auditId", auditId, pinned, WHY)
+                    : TenantScopedFinder.findTenantScoped(ec, "darpan.audit.Audit").condition("auditCode", auditCode).useCache(false).one()
+            if (audit == null || audit.companyUserGroupId != pinned) { ec.message.addError("Audit ${auditId ?: auditCode} was not found.".toString()); return null }
+            // DAR-UI-104: the audit page names its audit by code; everything below keys on the row id.
+            auditId = audit.auditId as String
+            if (findingId && !findingOfAudit(ec, pinned, auditId, findingId)) {
+                ec.message.addError("Finding ${findingId} was not found in audit ${auditId}.".toString()); return null
+            }
         }
         def conversation = null
         if (conversationId) {
             conversation = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.agent.AgentConversation", "conversationId", conversationId, pinned, WHY)
-            if (conversation == null || conversation.userId != userId || (conversation.auditId && conversation.auditId != auditId)) {
+            // DAR-BE-334: a query conversation has no audit, and an audit conversation always has one; neither continues the other
+            if (conversation == null || conversation.userId != userId || (query ? conversation.auditId : conversation.auditId != auditId)) {
                 ec.message.addError("Conversation ${conversationId} was not found.".toString()); return null
             }
         }
@@ -155,7 +172,7 @@ class AgentOrchestrator {
         if (overDailyCap(ec, pinned, cfg, lim)) return response(conversationId, "OVER_BUDGET", cfg.text("reply.OVER_BUDGET"))
 
         Map scrubbed = PasteScrubber.scrub(text)
-        Turn turn = new Turn(ec: ec, pinned: pinned, userId: userId, grantId: access.grantId as String, auditId: auditId, auditCode: audit.auditCode as String, findingId: findingId,
+        Turn turn = new Turn(ec: ec, pinned: pinned, userId: userId, grantId: access.grantId as String, auditId: auditId, auditCode: audit?.auditCode as String, findingId: findingId, query: query,
                 words: scrubbed.text as String, masked: (List<String>) scrubbed.masked, deadline: clock.call() + lim.turnWallClockMs, cfg: cfg, limits: lim)
         boolean fresh = conversation == null
         turn.conversationId = fresh ? TenantScopedFinder.mintId(ec, "darpan.agent.AgentConversation", "conversationId") : conversationId
@@ -180,7 +197,7 @@ class AgentOrchestrator {
 
         turn.priorIds = turn.transcript.madeIds()
         try {
-            runTurn(turn)
+            if (query) runQueryTurn(turn) else runTurn(turn)
         } catch (Stop stop) {
             turn.outcome = stop.outcome
             if (stop.reply) turn.replyParts << stop.reply
@@ -307,6 +324,45 @@ class AgentOrchestrator {
         }
         if (brain) authorWithEscalation(turn, items, evidence)
         else if (items.any { it.kind in TICKET_KINDS }) author(turn, items.findAll { it.kind in TICKET_KINDS }, null, RoleSpec.author(turn.cfg, turn.limits).copy(tools: ["raise_ticket"]))
+    }
+
+    // ---------------------------------------------------------------- queries (DAR-BE-334)
+
+    /**
+     * One query-author run: it reads the catalog, proposes, sees how the proposal ran (typed, no rows) and may fix and
+     * propose again; the last proposal that ran is the turn's. Its reply is its own words; a question goes to the person.
+     */
+    private void runQueryTurn(Turn turn) {
+        StringBuilder b = new StringBuilder()
+        if (turn.earlier) {
+            b << "The person's earlier messages, oldest first:\n"
+            turn.earlier.each { b << "- " << oneLine(it, 500) << "\n" }
+        }
+        if (turn.lastQuestion) b << "The last question asked of them: " << questionFor(turn.lastQuestion, [RoleSpec.QUERY_AUTHOR]) << "\n"
+        b << "\nThe person's words, verbatim:\n<<<MESSAGE\n" << turn.words << "\nMESSAGE>>>\n"
+        RoleResult r = role(turn, RoleSpec.queryAuthor(turn.cfg, turn.limits), [MessageParam.ofUser(b.toString())])
+        turn.queryProposal = lastQueryProposal(r.toolCalls)
+        if (r.outcome == "DONE") {
+            if (r.text()?.trim()) turn.replyParts << r.text().trim()
+        } else if (r.outcome == "QUESTION") {
+            Map input = (Map) r.control.input
+            turn.question = [text: input.question as String, options: (input.options ?: []) as List, from: RoleSpec.QUERY_AUTHOR]
+        } else {
+            turn.outcome = "INCOMPLETE"
+            turn.replyParts << stoppedReply(turn.cfg, r.outcome)
+        }
+    }
+
+    /** The last propose_query call that ran (status PROPOSED): {proposal, preview}; null when none did. */
+    static Map lastQueryProposal(List<Map> toolCalls) {
+        Map found = null
+        (toolCalls ?: []).each { Map call ->
+            if (call.name != "propose_query" || call.isError) return
+            Object out
+            try { out = new groovy.json.JsonSlurper().parseText((call.content ?: "") as String) } catch (Exception ignored) { out = null }
+            if (out instanceof Map && ((Map) out).status == "PROPOSED") found = [proposal: ((Map) out).proposal, preview: ((Map) out).preview]
+        }
+        return found
     }
 
     // ---------------------------------------------------------------- router
@@ -615,12 +671,13 @@ class AgentOrchestrator {
         if (outcome == "DONE" && turn.question != null) outcome = "QUESTION"
         String reply = turn.replyParts.findAll { it }.join("\n\n") ?: null
         // Never an empty answer: a turn that made nothing, asked nothing and says nothing tells the person so.
-        if (!reply && turn.question == null && !proposals && !turn.tickets) {
+        if (!reply && turn.question == null && !proposals && !turn.tickets && turn.queryProposal == null) {
             reply = turn.cfg.text(outcome == "TENANT_CHANGED" ? "reply.TENANT_CHANGED" : "reply.NOTHING_CAME_OUT")
             if (outcome == "DONE") outcome = "INCOMPLETE"
         }
         Map out = response(turn.conversationId, outcome, reply)
         out.proposals = proposals
+        if (turn.query) out.queryProposal = turn.queryProposal
         out.tickets = new ArrayList<Map>(turn.tickets.values())
         out.question = turn.question
         out.masked = turn.masked
@@ -909,6 +966,9 @@ class AgentOrchestrator {
         Transcript transcript
         Map<String, Map> proposals = new LinkedHashMap<>()
         Map<String, Map> tickets = new LinkedHashMap<>()
+        /** DAR-BE-334: a turn from the queries page, and the query it proposed ({proposal, preview}) or null. */
+        boolean query
+        Map queryProposal
         /** The conversation's proposal and ticket ids before this turn's roles ran. */
         Map<String, List<String>> priorIds = [proposals: [], tickets: []]
         /** The typed facts the turn ended with, or null when it investigated nothing. */

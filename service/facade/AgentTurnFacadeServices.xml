@@ -42,6 +42,34 @@
         </actions>
     </service>
 
+    <service verb="send" noun="AgentQueryTurn" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
+        <description>DAR-BE-334. One message from the queries page: the agent reads what the tenant's queries may read and
+            proposes one query that has already run on the tenant's data (queryProposal {proposal, preview}); nothing is
+            saved until the person saves it (save#TenantQuery). Same gates and outcomes as send#AgentTurn.</description>
+        <in-parameters>
+            <parameter name="conversationId"><description>Continue this query conversation; empty starts one.</description></parameter>
+            <parameter name="text" required="true" allow-html="any"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="conversationId"/>
+            <parameter name="outcome"/>
+            <parameter name="reply"/>
+            <parameter name="queryProposal" type="Map"><description>{proposal: {queryName, description, readSpecJson, scriptBody, readText}, preview} or empty.</description></parameter>
+            <parameter name="question" type="Map"><description>{text, options, from} when the agent needs the person's answer.</description></parameter>
+            <parameter name="masked" type="List"><description>The kinds of secret or personal data masked in the text (never the values).</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="turn" from="darpan.agent.AgentOrchestrator.forRequest(ec).sendQuery(ec, conversationId, text)"/>
+            <if condition="turn == null || ec.message.hasError()"><return error="true"/></if>
+            <set field="conversationId" from="turn.conversationId"/>
+            <set field="outcome" from="turn.outcome"/>
+            <set field="reply" from="turn.reply"/>
+            <set field="queryProposal" from="turn.queryProposal"/>
+            <set field="question" from="turn.question"/>
+            <set field="masked" from="turn.masked"/>
+        </actions>
+    </service>
+
     <!-- DAR-BE-223. The panel's two reads. Neither calls the model or writes. -->
 
     <service verb="get" noun="AgentStatus" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">

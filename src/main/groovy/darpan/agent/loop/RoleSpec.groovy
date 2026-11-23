@@ -15,6 +15,8 @@ final class RoleSpec {
     static final String ROUTER = "ROUTER"
     static final String INVESTIGATOR = "INVESTIGATOR"
     static final String AUTHOR = "AUTHOR"
+    /** DAR-BE-334: the queries page's one role; it reads the query catalog and proposes queries that have already run. */
+    static final String QUERY_AUTHOR = "QUERY_AUTHOR"
 
     final String role
     final String model
@@ -47,7 +49,7 @@ final class RoleSpec {
         wallClockMs = args.wallClockMs as long
         maxTokens = args.maxTokens as long
         outputSchema = args.outputSchema == null ? null : ((Map) args.outputSchema).asImmutable()
-        if (!(role in [ROUTER, INVESTIGATOR, AUTHOR])) throw new IllegalArgumentException("Unknown role: ${role}".toString())
+        if (!(role in [ROUTER, INVESTIGATOR, AUTHOR, QUERY_AUTHOR])) throw new IllegalArgumentException("Unknown role: ${role}".toString())
         systemPrompt = (args.systemPrompt ?: (systemPromptPath ? config.promptForPath(systemPromptPath) : null)) as String
         if (!model || !effort || !systemPromptPath) throw new IllegalArgumentException("model, effort and systemPromptPath are required")
         tools.each { String t ->
@@ -84,6 +86,14 @@ final class RoleSpec {
                 tools: ["propose_exclusion", "propose_statement_narrowing", "propose_expected_causes", "propose_fix_text", "propose_conclusion_rows", "propose_audit_setup",
                         "propose_statement_edit", "raise_ticket",
                         "ask_human", "request_more_evidence"],
+                maxRequests: lim.authorMaxRequests, maxToolCalls: lim.authorMaxToolCalls, wallClockMs: lim.authorWallClockMs,
+                maxTokens: lim.authorMaxTokens, config: cfg, limits: lim)
+    }
+
+    /** DAR-BE-334. The queries page's role, on the author's model and limits: catalog, propose (runs first), or ask. */
+    static RoleSpec queryAuthor(AgentConfig cfg = AgentConfig.current(null), AgentLimits lim = AgentLimits.read()) {
+        return new RoleSpec(role: QUERY_AUTHOR, model: cfg.model(AgentConfigDefaults.AUTHOR), effort: "HIGH", systemPromptPath: "darpan/agent/prompts/query-author.md",
+                tools: ["get_query_catalog", "propose_query", "ask_human"],
                 maxRequests: lim.authorMaxRequests, maxToolCalls: lim.authorMaxToolCalls, wallClockMs: lim.authorWallClockMs,
                 maxTokens: lim.authorMaxTokens, config: cfg, limits: lim)
     }

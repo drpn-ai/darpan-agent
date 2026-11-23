@@ -107,6 +107,12 @@ class AgentOrchestratorTests {
                 "component://darpan/data/DarpanSystemSourceSeedData.xml", "component://darpan/data/AutomationSeedData.xml",
                 "component://darpan/data/SourceSystemConnectorSeedData.xml", "component://darpan/data/MappingSeedData.xml",
                 "component://darpan/data/SystemMessageRemoteSeedData.xml")
+        // DAR-BE-334: the query read sources and moqui-jexl's grants, for the queries page's agent
+        ["component://moqui-jexl/data/JexlSecurityData.xml", "component://darpan/data/QuerySeedData.xml"].each { String location ->
+            asSystem { ec.entity.makeDataLoader().location(location).dummyFks(true).load() }
+        }
+        // every Darpan user is in DARPAN_USER, which holds the query read sources' grants
+        asSystem { upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: USER, fromDate: FROM]) }
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         asSystem {
             upsert("moqui.security.UserGroup", [userGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID,
@@ -1182,5 +1188,46 @@ class AgentOrchestratorTests {
         InputStream s = AgentOrchestratorTests.classLoader.getResourceAsStream(path)
         assertNotNull(s, path)
         try { return s.getText("UTF-8") } finally { s.close() }
+    }
+
+    // ---------------------------------------------------------------- DAR-BE-334 the queries page's agent
+
+    private static final String OPEN_FINDINGS_SCRIPT = "var rows = [...]; for (var f : input.findings) { fn:push(rows, [f.recordKey, f.headline]); } " +
+            "{'summary': 'open findings', 'files': [{'name': 'open.csv', 'columns': ['key', 'headline'], 'rows': rows}]}"
+
+    @Test
+    void aQueryTurnProposesAQueryThatRanAndTheModelNeverReadsItsRows() {
+        String read = JsonOutput.toJson([inputs: [[name: "findings", source: "auditFindings", auditId: AUDIT, fields: ["recordKey", "headline"]]]])
+        def g = new AgentRoleLoopTests.ScriptedGateway([
+                authorSays([toolUse("q1", "get_query_catalog", [:])]),
+                authorSays([toolUse("q2", "propose_query", [queryName: "Open findings", description: "Every open finding",
+                        readSpecJson: read, scriptBody: OPEN_FINDINGS_SCRIPT])]),
+                authorEnds("It lists every open finding with its headline.")])
+        long before = asSystem { ec.entity.find("jexl.script.UserScript").count() }
+        Map out = new AgentOrchestrator(g, AVAILABLE).sendQuery(ec, null, "Which findings are open?")
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertEquals("DONE", out.outcome, "${out}")
+        assertEquals("It lists every open finding with its headline.", out.reply)
+        Map proposal = (Map) out.queryProposal
+        assertNotNull(proposal, "no proposal ran; the model read: " + sentJson(g, 2).takeRight(1500))
+        assertEquals("Open findings", proposal.proposal.queryName)
+        assertTrue((((List<Map>) proposal.preview.files)?.getAt(0)?.previewRows as List)?.contains(["CM-1001", "Memo CM-1001 is open"]), "${proposal.preview}")
+        String first = sentJson(g, 0)
+        assertTrue(first.contains("propose_query") && !first.contains("propose_exclusion"), "only the query tools")
+        String afterRun = sentJson(g, 2)
+        assertTrue(afterRun.contains("PROPOSED"), afterRun)
+        assertFalse(afterRun.contains("CM-1001"), "the model never reads a row")
+        assertEquals(before, asSystem { ec.entity.find("jexl.script.UserScript").count() }, "nothing is saved")
+    }
+
+    @Test
+    void aQueryConversationNeverContinuesAsAnAuditOne() {
+        def g = new AgentRoleLoopTests.ScriptedGateway([authorEnds("Which audit's findings do you mean?")])
+        Map out = new AgentOrchestrator(g, AVAILABLE).sendQuery(ec, null, "Count my findings")
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        Map audit = new AgentOrchestrator(new AgentRoleLoopTests.ScriptedGateway([]), AVAILABLE).send(ec, out.conversationId as String, AUDIT, FINDING, "Why?")
+        assertNull(audit)
+        assertTrue(ec.message.errorsString.contains("was not found"), ec.message.errorsString)
+        ec.message.clearErrors()
     }
 }

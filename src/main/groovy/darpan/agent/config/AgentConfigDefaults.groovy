@@ -32,7 +32,9 @@ class AgentConfigDefaults {
             "router": "darpan/agent/prompts/router.md", "investigator": "darpan/agent/prompts/investigator.md",
             "author": "darpan/agent/prompts/author.md", "email-smile": "darpan/agent/prompts/email-smile.md",
             "audit-run-words": "darpan/agent/prompts/audit-run-words.md",
-            "audit-read-review": "darpan/agent/prompts/audit-read-review.md"].asImmutable()
+            "audit-read-review": "darpan/agent/prompts/audit-read-review.md",
+            // DAR-BE-334: the queries page's agent
+            "query-author": "darpan/agent/prompts/query-author.md"].asImmutable()
 
     private static final Map<String, String> TEXTS = new ConcurrentHashMap<>()
 

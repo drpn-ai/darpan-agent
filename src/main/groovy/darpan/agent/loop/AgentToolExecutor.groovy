@@ -112,6 +112,7 @@ class AgentToolExecutor {
             }
         }
         if (spec.role == RoleSpec.AUTHOR) done.modelContent = authorView(toolName, done.isError as boolean, done.content as String)
+        if (spec.role == RoleSpec.QUERY_AUTHOR) done.modelContent = queryView(toolName, done.isError as boolean, done.content as String)
         return done
     }
 
@@ -139,6 +140,45 @@ class AgentToolExecutor {
         }
         if (toolName == "raise_ticket") return JsonOutput.toJson([ticketId: token(o.ticketId), duplicate: o.duplicate == true])
         return TOOL_ERROR
+    }
+
+    /**
+     * DAR-BE-334. What the query author's model reads (never rows, summaries or record values, which can carry text written
+     * by anyone): the catalog as ids, field names and short cleaned names; a proposal as its status, refusal code and field,
+     * read counts, each file's row count and the script error's kind and line.
+     */
+    static String queryView(String toolName, boolean isError, String content) {
+        if (isError) return content == TOOL_FAILED ? TOOL_FAILED : TOOL_ERROR
+        Object out
+        try { out = new groovy.json.JsonSlurper().parseText(content ?: "") } catch (Exception ignored) { out = null }
+        if (!(out instanceof Map)) return TOOL_ERROR
+        Map o = (Map) out
+        Closure<List> fields = { Object v -> v instanceof List ? ((List) v).collect { token(it) }.findAll { it } : null }
+        if (toolName == "get_query_catalog") {
+            return JsonOutput.toJson([
+                    datasets : ((o.datasets ?: []) as List<Map>).collect { Map d -> [datasetId: token(d.datasetId), system: label(d.system),
+                            windowField: token(d.windowField), wholeRecords: d.wholeRecords == true, fields: fields(d.fields)] },
+                    savedRuns: ((o.savedRuns ?: []) as List<Map>).collect { Map r -> [savedRunId: token(r.savedRunId), runName: label(r.runName),
+                            fields: fields(r.fields)] },
+                    audits   : ((o.audits ?: []) as List<Map>).collect { Map a -> [auditId: token(a.auditId), auditCode: token(a.auditCode),
+                            auditName: label(a.auditName), fields: fields(a.fields)] }])
+        }
+        if (toolName == "propose_query") {
+            Map p = o.preview instanceof Map ? (Map) o.preview : [:]
+            Map err = p.error instanceof Map ? (Map) p.error : null
+            Map counts = p.readCounts instanceof Map ? ((Map) p.readCounts).collectEntries { k, v -> [(token(k) ?: "input"): v instanceof Number ? v : null] } : null
+            return JsonOutput.toJson([status: token(o.status), code: token(o.code), field: token(o.field), ok: p.ok == true,
+                    readCounts: counts, files: ((p.files ?: []) as List<Map>).collect { Map f -> [rowCount: f.rowCount instanceof Number ? f.rowCount : null] },
+                    nothing: p.nothing == true, invalid: p.invalid != null,
+                    error: err == null ? null : [kind: token(err.kind), line: err.line instanceof Number ? err.line : null]])
+        }
+        return TOOL_ERROR
+    }
+
+    /** A config name for the model: letters, digits, spaces and simple punctuation only, at most 80 characters. */
+    private static String label(Object v) {
+        String s = v?.toString()?.replaceAll(/[^\p{L}\p{N} ._\-\/()&,']/, " ")?.replaceAll(/\s+/, " ")?.trim()
+        return s ? s.take(80) : null
     }
 
     /** The closed set the author reads in place of a proposal's free-text statusMessage. */

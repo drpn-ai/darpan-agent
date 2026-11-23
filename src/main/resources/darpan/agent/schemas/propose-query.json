@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "queryName",
+    "description",
+    "readSpecJson",
+    "scriptBody"
+  ],
+  "properties": {
+    "queryName": {
+      "type": "string",
+      "description": "A short name for the query, in the person's words."
+    },
+    "description": {
+      "type": "string",
+      "description": "One sentence: what it answers."
+    },
+    "readSpecJson": {
+      "type": "string",
+      "description": "The read as JSON: {\"inputs\": [{\"name\", \"source\" (dataset | runResult | auditFindings), \"datasetId\" | \"savedRunId\" | \"auditId\", \"fields\", optional \"where\", \"window\" {\"lastDays\"}, \"groupBy\", \"measures\", \"orderBy\"}]}. Only the catalog's ids and fields."
+    },
+    "scriptBody": {
+      "type": "string",
+      "description": "The JEXL script. input.<name> is each input's rows. Return {'summary': '...', 'files': [{'name': 'x.csv', 'columns': [...], 'rows': [[...]]}]}."
+    }
+  }
+}

@@ -63,6 +63,9 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'
     testImplementation project(':runtime:component:darpan')
     testImplementation project(':runtime:component:darpan').sourceSets.test.output
+    // DAR-BE-334: darpan's tenant queries run on moqui-jexl; on a server every component shares one classloader, but a
+    // test run needs it on the classpath for the queries page's agent tests
+    testRuntimeOnly project(':runtime:component:moqui-jexl')
     testImplementation 'org.apache.logging.log4j:log4j-core:2.25.2' // capture log output in the key-leak test (test only)
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.2'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.9.2'

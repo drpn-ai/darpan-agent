@@ -268,7 +268,7 @@ class AgentConfigTests {
         // Every text is accounted for: today's words, the one new refusal reply, and the tools.
         Set<String> expected = new TreeSet<>(TODAYS_WORDS.keySet()); expected << "reply.AGENT_REFUSED"
         List<Map> tools = (List<Map>) new groovy.json.JsonSlurper().parse(AgentConfigTests.class.classLoader.getResourceAsStream("darpan/agent/tools.json"))
-        assertEquals(15, tools.size())
+        assertEquals(17, tools.size())   // DAR-BE-334: get_query_catalog, propose_query
         tools.each { Map t ->
             expected << ("tool." + t.name)
             assertEquals(t.description, c.text("tool." + t.name), "tool.${t.name}".toString())
@@ -282,7 +282,7 @@ class AgentConfigTests {
     void everyToolDefinitionBuilds() {
         List<String> names = darpan.agent.loop.AgentToolExecutor.TOOLS.keySet() as List
         def defs = darpan.agent.loop.AgentToolExecutor.toolDefinitions(names, AgentConfig.defaults())
-        assertEquals(15, defs.size())
+        assertEquals(17, defs.size())
         assertEquals(names.toSorted(), defs*.name())
         defs.each { d ->
             Map t = darpan.agent.loop.AgentToolExecutor.TOOLS[d.name()]

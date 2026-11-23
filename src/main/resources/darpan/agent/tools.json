@@ -135,6 +135,19 @@
     "input_schema_resource": "darpan/agent/schemas/propose-statement-edit.json"
   },
   {
+    "name": "get_query_catalog",
+    "read": true,
+    "service": "facade.TenantScriptFacadeServices.get#TenantQueryCatalog",
+    "description": "What this tenant's queries may read: its kept datasets (datasetId, system, window field and the fields kept; wholeRecords means any field), its saved runs (their newest result's differences) and its audits (their findings, with a fixed field list). A query reads nothing else.",
+    "input_schema": {"type": "object", "additionalProperties": false, "properties": {}}
+  },
+  {
+    "name": "propose_query",
+    "service": "facade.TenantScriptFacadeServices.create#TenantQueryProposal",
+    "description": "Proposes a query for the person: a read (JSON, over the catalog's sources and fields only) and a JEXL script over it. The read is checked against the catalog and the query runs on the tenant's data before the person sees it; you get back its status (PROPOSED, or REFUSED with a code and the field), read counts, each file's row count and any script error's kind and line. Nothing is saved: the person saves it.",
+    "input_schema_resource": "darpan/agent/schemas/propose-query.json"
+  },
+  {
     "name": "raise_ticket",
     "service": "facade.AgentChangeFacadeServices.create#BrainChangeTicket",
     "conversationScoped": true,

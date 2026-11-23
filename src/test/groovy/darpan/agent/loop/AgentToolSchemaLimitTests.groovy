@@ -22,7 +22,7 @@ class AgentToolSchemaLimitTests {
 
     static List<RoleSpec> roles() {
         Map anySchema = [type: "object", additionalProperties: false, required: ["x"], properties: [x: [type: "string"]]]
-        return [RoleSpec.router(anySchema), RoleSpec.investigator(), RoleSpec.author(), RoleSpec.author().copy(tools: ["raise_ticket"])]
+        return [RoleSpec.router(anySchema), RoleSpec.investigator(), RoleSpec.author(), RoleSpec.author().copy(tools: ["raise_ticket"]), RoleSpec.queryAuthor()]
     }
 
     @Test
