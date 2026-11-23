@@ -14,6 +14,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 class ProposeQueryTests {
 
     @Test
+    void everyReadThePromptShowsParses() {
+        String prompt = ProposeQueryTests.classLoader.getResourceAsStream("darpan/agent/prompts/query-author.md").getText("UTF-8")
+        List<String> reads = (prompt =~ /(?s)```json\n(.*?)```/).collect { it[1] as String }
+        assertEquals(2, reads.size())
+        reads.each { String json -> org.moqui.jexl.script.ReadSpec.parse(json) }
+    }
+
+    @Test
     void theQueryAuthorCanReadTheCatalogProposeAndAskOnly() {
         assertEquals(["get_query_catalog", "propose_query", "ask_human"], RoleSpec.queryAuthor().tools)
         assertTrue(AgentToolExecutor.TOOLS.get_query_catalog.read as boolean)

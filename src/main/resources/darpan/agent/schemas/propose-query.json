@@ -18,7 +18,7 @@
     },
     "readSpecJson": {
       "type": "string",
-      "description": "The read as JSON: {\"inputs\": [{\"name\", \"source\" (dataset | runResult | auditFindings), \"datasetId\" | \"savedRunId\" | \"auditId\", \"fields\", optional \"where\", \"window\" {\"lastDays\"}, \"groupBy\", \"measures\", \"orderBy\"}]}. Only the catalog's ids and fields."
+      "description": "The read as JSON: {\"inputs\": [{\"name\", \"source\" (dataset | runResult | auditFindings), \"datasetId\" | \"savedRunId\" | \"auditId\", \"fields\", optional \"where\" {field, op, value}, \"window\" {\"field\", \"lastDays\"}, \"groupBy\" with \"measures\" [{\"fn\", \"field\", \"as\"}], \"orderBy\"}]}. Only the catalog's ids and fields."
     },
     "scriptBody": {
       "type": "string",

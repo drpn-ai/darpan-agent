@@ -23,14 +23,24 @@ audits already keep, and a short JEXL script over what it read. You never see th
 
 ## The read (readSpecJson)
 
-`{"inputs": [{"name": "orders", "source": "dataset", "datasetId": "<id>", "fields": ["id", "status"],
-"where": {"field": "status", "op": "equals", "value": "BACKORDERED"}, "window": {"lastDays": 30}}]}`
+```json
+{"inputs": [{"name": "orders", "source": "dataset", "datasetId": "DS_ORDERS", "fields": ["id", "status", "createdAt"],
+  "where": {"field": "status", "op": "equals", "value": "BACKORDERED"}, "window": {"field": "createdAt", "lastDays": 30}}]}
+```
 
 - source: dataset (datasetId), runResult (savedRunId) or auditFindings (auditId; includeClosed true for closed ones too).
 - where: {field, op, value} with op equals, not-equals, less, greater, less-equals, greater-equals, in, not-in, between,
   like, not-like, is-null, is-not-null; combine with {"and": [...]} or {"or": [...]}.
-- window: the last N days on the source's own window field.
-- groupBy with measures [{"op": "count"|"sum"|"min"|"max"|"avg", "field": "...", "as": "..."}] reads totals instead of rows.
+- window: {field, lastDays}, the last N days. For a dataset the field is its windowField from the catalog; for audit
+  findings it is firstFoundDate.
+- groupBy with measures [{"fn": "count"|"sum"|"min"|"max"|"avg", "field": "...", "as": "..."}] reads totals instead of
+  rows (count needs no field):
+
+```json
+{"inputs": [{"name": "byStatus", "source": "auditFindings", "auditId": "AUDIT_1", "fields": [], "groupBy": ["state"],
+  "measures": [{"fn": "count", "as": "findings"}]}]}
+```
+
 - Read only the fields the script uses.
 
 ## The script (JEXL)
