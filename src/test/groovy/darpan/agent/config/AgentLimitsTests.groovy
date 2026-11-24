@@ -35,6 +35,7 @@ class AgentLimitsTests {
             ["minConfidence", "0.6", 0, 1, "factor"],
             ["maxEvidenceRounds", "2", 0, 5, "count"], ["maxItems", "10", 1, 50, "count"], ["maxFacts", "100", 1, 1000, "count"],
             ["maxAnswerChars", "4000", 200, 20000, "chars"], ["maxMessageChars", "20000", 1000, 20000, "chars"], ["earlierTurns", "4", 0, 20, "count"],
+            ["statementSampleFindings", "10", 0, 50, "count"],
     ]
 
     private static Map<String, SettingDefinition> agentCatalog() {
@@ -62,8 +63,8 @@ class AgentLimitsTests {
     @DisplayName("the agent catalog parses, every default is valid and equals today's code value")
     void theAgentCatalogParsesAndDefaultsAreToday() {
         Map<String, SettingDefinition> cat = agentCatalog()
-        assertEquals(TABLE.collect { keyOf(it[0] as String) } as Set, cat.keySet(), "exactly the 36 keys")
-        assertEquals(36, cat.size())
+        assertEquals(TABLE.collect { keyOf(it[0] as String) } as Set, cat.keySet(), "exactly the 37 keys")
+        assertEquals(37, cat.size())
         TABLE.each { List row ->
             SettingDefinition d = cat[keyOf(row[0] as String)]
             assertTrue(d.area.startsWith("Agent"), "area of ${d.key}: ${d.area}")

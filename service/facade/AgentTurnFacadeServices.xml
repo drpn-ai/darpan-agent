@@ -17,6 +17,7 @@
             <parameter name="auditId"><description>The audit's row id; or name it by auditCode. Exactly one of the two.</description></parameter>
             <parameter name="auditCode"><description>The audit's code (the JSON audit id, e.g. month-close), looked up in the active tenant.</description></parameter>
             <parameter name="findingId"><description>The finding the panel is open on.</description></parameter>
+            <parameter name="statement"><description>DAR-BE-252. The statement code (e.g. R2) the panel is open on; the turn then carries the statement and a sample of its open Unexplained findings.</description></parameter>
             <!-- Pasted investigations may hold angle brackets; the text is stored and shown as plain text, never as HTML. -->
             <parameter name="text" required="true" allow-html="any"/>
         </in-parameters>
@@ -30,7 +31,7 @@
             <parameter name="masked" type="List"><description>The kinds of secret or personal data masked in the text (never the values).</description></parameter>
         </out-parameters>
         <actions>
-            <set field="turn" from="darpan.agent.AgentOrchestrator.forRequest(ec).send(ec, conversationId, auditId, findingId, text, auditCode)"/>
+            <set field="turn" from="darpan.agent.AgentOrchestrator.forRequest(ec).send(ec, conversationId, auditId, findingId, text, auditCode, statement)"/>
             <if condition="turn == null || ec.message.hasError()"><return error="true"/></if>
             <set field="conversationId" from="turn.conversationId"/>
             <set field="outcome" from="turn.outcome"/>

@@ -51,6 +51,7 @@ class AgentLimits {
     static final String MAX_ANSWER_CHARS = "darpan.agent.maxAnswerChars"
     static final String MAX_MESSAGE_CHARS = "darpan.agent.maxMessageChars"
     static final String EARLIER_TURNS = "darpan.agent.earlierTurns"
+    static final String STATEMENT_SAMPLE_FINDINGS = "darpan.agent.statementSampleFindings"
 
     int turnsPerUserPerHour
     BigDecimal dailyUsdCapPerTenant
@@ -88,6 +89,8 @@ class AgentLimits {
     int maxAnswerChars
     int maxMessageChars
     int earlierTurns
+    /** DAR-BE-252: open Unexplained findings shown with a statement the agent opens on. */
+    int statementSampleFindings
 
     /** The effective limits now. When a row written straight to the database leaves the backoff base at or above the max, both take their catalog defaults (WARN once). */
     static AgentLimits read() {
@@ -134,7 +137,8 @@ class AgentLimits {
                 maxFacts: DarpanSettings.intValue(MAX_FACTS),
                 maxAnswerChars: DarpanSettings.intValue(MAX_ANSWER_CHARS),
                 maxMessageChars: DarpanSettings.intValue(MAX_MESSAGE_CHARS),
-                earlierTurns: DarpanSettings.intValue(EARLIER_TURNS)
+                earlierTurns: DarpanSettings.intValue(EARLIER_TURNS),
+                statementSampleFindings: DarpanSettings.intValue(STATEMENT_SAMPLE_FINDINGS)
         )
     }
 }

@@ -114,8 +114,8 @@ class AgentOrchestrator {
      * tenant, a person without edit access, an audit, finding or conversation that is not the tenant's, empty or overlong
      * text). DAR-BE-292: only an editor or tenant admin talks to the agent, so every draft it makes can be planned at once.
      */
-    Map send(def ec, String conversationId, String auditId, String findingId, String text, String auditCode = null) {
-        return sendTurn(ec, conversationId, auditId, findingId, text, auditCode, false)
+    Map send(def ec, String conversationId, String auditId, String findingId, String text, String auditCode = null, String statementCode = null) {
+        return sendTurn(ec, conversationId, auditId, findingId, text, auditCode, false, null, statementCode)
     }
 
     /**
@@ -128,7 +128,7 @@ class AgentOrchestrator {
     }
 
     private Map sendTurn(def ec, String conversationId, String auditId, String findingId, String text, String auditCode, boolean query,
-                         Map draft = null) {
+                         Map draft = null, String statementCode = null) {
         // DAR-BE-307: one config and one limits snapshot for the whole turn, taken first and never inside a lock; every check
         // and role below (availability included) reads from these two, so an edit made mid-turn waits for the next turn.
         AgentConfig cfg = AgentConfig.current(ec)
@@ -156,6 +156,13 @@ class AgentOrchestrator {
                 ec.message.addError("Finding ${findingId} was not found in audit ${auditId}.".toString()); return null
             }
         }
+        // DAR-BE-252: opened on a statement (the run email's "Explain them to the agent"): the statement and a sample of its
+        // open Unexplained findings go with every role's input, so the person can speak of "these" without opening one.
+        Map onStatement = null
+        if (statementCode && !query) {
+            onStatement = statementContext(ec, pinned, auditId, statementCode, lim.statementSampleFindings)
+            if (onStatement == null) { ec.message.addError("Statement ${statementCode} was not found in audit ${auditId}.".toString()); return null }
+        }
         def conversation = null
         if (conversationId) {
             conversation = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.agent.AgentConversation", "conversationId", conversationId, pinned, WHY)
@@ -173,7 +180,7 @@ class AgentOrchestrator {
         if (overDailyCap(ec, pinned, cfg, lim)) return response(conversationId, "OVER_BUDGET", cfg.text("reply.OVER_BUDGET"))
 
         Map scrubbed = PasteScrubber.scrub(text)
-        Turn turn = new Turn(ec: ec, pinned: pinned, userId: userId, grantId: access.grantId as String, auditId: auditId, auditCode: audit?.auditCode as String, findingId: findingId, query: query,
+        Turn turn = new Turn(ec: ec, pinned: pinned, userId: userId, grantId: access.grantId as String, auditId: auditId, auditCode: audit?.auditCode as String, findingId: findingId, statement: onStatement, query: query,
                 words: scrubbed.text as String, masked: (List<String>) scrubbed.masked, draft: query ? scrubDraft(draft) : null, deadline: clock.call() + lim.turnWallClockMs, cfg: cfg, limits: lim)
         boolean fresh = conversation == null
         turn.conversationId = fresh ? TenantScopedFinder.mintId(ec, "darpan.agent.AgentConversation", "conversationId") : conversationId
@@ -399,7 +406,7 @@ class AgentOrchestrator {
         // With a finding open the person's "it" or "this" has its referent, so a low score alone is no reason to ask which
         // finding they mean (the first paid eval ended a plain exclusion on that question); a question the router wrote
         // itself is still asked.
-        boolean unsure = !turn.findingId && items.any { (it.confidence as BigDecimal) < turn.limits.minConfidence }
+        boolean unsure = !turn.findingId && !turn.statement && items.any { (it.confidence as BigDecimal) < turn.limits.minConfidence }
         if (question || unsure) {
             turn.question = [text: question ?: turn.cfg.text("reply.CLARIFY"), options: [], from: RoleSpec.ROUTER]
             turn.outcome = "QUESTION"
@@ -411,6 +418,7 @@ class AgentOrchestrator {
     private String routerInput(Turn turn) {
         StringBuilder b = new StringBuilder()
         b << "Open finding: " << (turn.findingId ?: "none") << "\n"
+        statementLines(b, turn)
         if (turn.earlier) {
             b << "The person's earlier messages, oldest first:\n"
             turn.earlier.each { b << "- " << oneLine(it, 500) << "\n" }
@@ -438,6 +446,7 @@ class AgentOrchestrator {
         StringBuilder b = new StringBuilder()
         b << "Audit: " << (turn.auditCode ?: turn.auditId) << " (auditId " << turn.auditId << ")\n"
         b << "Open finding: " << (turn.findingId ?: "none") << "\n"
+        statementLines(b, turn)
         b << "Items (index from 0): " << JsonOutput.toJson(itemsView(items)) << "\n"
         b << "\nThe person's words:\n<<<MESSAGE\n" << turn.words << "\nMESSAGE>>>\n"
         if (need) b << "\nThe author needs this before it can write a change or ticket: " << oneLine(need, 500) << "\n"
@@ -565,6 +574,7 @@ class AgentOrchestrator {
         StringBuilder b = new StringBuilder()
         b << "Audit: " << (turn.auditCode ?: turn.auditId) << " (auditId " << turn.auditId << ")\n"
         b << "Open finding: " << (turn.findingId ?: "none") << "\n"
+        statementLines(b, turn)
         if (turn.earlier) {
             b << "The person's earlier messages, oldest first:\n"
             turn.earlier.each { b << "- " << oneLine(it, 500) << "\n" }
@@ -781,6 +791,36 @@ class AgentOrchestrator {
     // ---------------------------------------------------------------- rows
 
     /** The finding is the tenant's and sits under one of this audit's statements. */
+    /**
+     * DAR-BE-252. The statement the agent was opened on and a sample of its open Unexplained findings (no conclusion, or
+     * UNEXPLAINED), most recently seen first: {statementCode, text, unexplained (count), sample [{findingId, recordKey,
+     * headline}]}. Null when the audit has no such statement in the active tenant.
+     */
+    private static Map statementContext(def ec, String pinned, String auditId, String statementCode, int sampleSize) {
+        def statement = TenantScopedFinder.findTenantScoped(ec, "darpan.audit.AuditStatement").condition("auditId", auditId)
+                .condition("statementCode", statementCode).useCache(false).one()
+        if (statement == null || statement.companyUserGroupId != pinned) return null
+        def open = TenantScopedFinder.findTenantScoped(ec, "darpan.audit.AuditFinding").condition("companyUserGroupId", pinned)
+                .condition("statementId", statement.statementId).condition("stateEnumId", "AUDFS_OPEN")
+                .condition(ec.entity.conditionFactory.makeCondition([
+                        ec.entity.conditionFactory.makeCondition("conclusionEnumId", org.moqui.entity.EntityCondition.ComparisonOperator.EQUALS, null),
+                        ec.entity.conditionFactory.makeCondition("conclusionEnumId", org.moqui.entity.EntityCondition.ComparisonOperator.EQUALS, "UNEXPLAINED")],
+                        org.moqui.entity.EntityCondition.JoinOperator.OR))
+                .orderBy("-lastSeenDate").orderBy("findingId").useCache(false)
+        long count = open.count()
+        List<Map> sample = sampleSize > 0 ? open.limit(sampleSize).list().collect { def f ->
+            [findingId: f.findingId, recordKey: f.recordKey, headline: f.headline] as Map } : []
+        return [statementCode: statementCode, text: statement.statementText, unexplained: count, sample: sample]
+    }
+
+    private static void statementLines(StringBuilder b, Turn turn) {
+        if (!turn.statement) return
+        Map s = turn.statement
+        b << "Open statement: " << s.statementCode << " (" << oneLine(s.text as String, 300) << ")\n"
+        b << "It has " << s.unexplained << " open findings with no cause (Unexplained). The person was invited to explain them; " <<
+                "\"these\" means them. A sample, most recently seen first: " << JsonOutput.toJson(s.sample) << "\n"
+    }
+
     private static boolean findingOfAudit(def ec, String pinned, String auditId, String findingId) {
         def finding = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditFinding", "findingId", findingId, pinned, WHY)
         if (finding == null) return false
@@ -975,6 +1015,8 @@ class AgentOrchestrator {
         String auditId
         String auditCode
         String findingId
+        /** DAR-BE-252: the statement the agent was opened on, with a sample of its Unexplained findings, or null. */
+        Map statement
         String words
         List<String> masked = []
         List<String> earlier = []

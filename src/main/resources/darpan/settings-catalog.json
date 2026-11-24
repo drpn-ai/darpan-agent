@@ -35,6 +35,7 @@
     {"key": "darpan.agent.maxFacts", "type": "INT", "area": "Agent · Router", "unit": "count", "description": "Most evidence facts one turn may hold.", "defaultValue": "100", "min": 1, "max": 1000},
     {"key": "darpan.agent.maxAnswerChars", "type": "INT", "area": "Agent · Router", "unit": "chars", "description": "Longest an answer may be before it is cut.", "defaultValue": "4000", "min": 200, "max": 20000},
     {"key": "darpan.agent.maxMessageChars", "type": "INT", "area": "Agent · Router", "unit": "chars", "description": "Longest a message from the person may be.", "defaultValue": "20000", "min": 1000, "max": 20000},
-    {"key": "darpan.agent.earlierTurns", "type": "INT", "area": "Agent · Router", "unit": "count", "description": "Earlier turns of the conversation the agent reads.", "defaultValue": "4", "min": 0, "max": 20}
+    {"key": "darpan.agent.earlierTurns", "type": "INT", "area": "Agent · Router", "unit": "count", "description": "Earlier turns of the conversation the agent reads.", "defaultValue": "4", "min": 0, "max": 20},
+    {"key": "darpan.agent.statementSampleFindings", "type": "INT", "area": "Agent · Router", "unit": "count", "description": "Open Unexplained findings the agent is shown when it opens on a statement.", "defaultValue": "10", "min": 0, "max": 50}
   ]
 }

@@ -777,6 +777,37 @@ class AgentOrchestratorTests {
         assertTrue(sentJson(g, 3).contains("Evidence so far"), "the facts survive five operator notes")
     }
 
+    // DAR-BE-252: the run email's "Explain them to the agent" opens the agent on a statement. The turn carries the statement
+    // and a sample of its open Unexplained findings, so "these are all X" needs no finding open and no clarifying question.
+    @Test
+    void "a turn on a statement carries the statement and a sample of its open Unexplained findings"() {
+        asSystem {
+            upsert("darpan.audit.AuditFinding", [findingId: "F-90011", companyUserGroupId: MINE, statementId: "AGO_R1", checkId: "AGO_CHK",
+                    recordKey: "CM-1011", period: "2026-10", stateEnumId: "AUDFS_OPEN", headline: "Memo CM-1011 is open",
+                    firstFoundDate: Date.valueOf("2026-10-08"), lastSeenDate: Date.valueOf("2026-10-09")])
+            upsert("darpan.audit.AuditFinding", [findingId: "F-90012", companyUserGroupId: MINE, statementId: "AGO_R1", checkId: "AGO_CHK",
+                    recordKey: "CM-1012", period: "2026-10", stateEnumId: "AUDFS_FIXED", headline: "Memo CM-1012 is open",
+                    firstFoundDate: Date.valueOf("2026-10-08"), lastSeenDate: Date.valueOf("2026-10-08")])
+        }
+        String words = "These are all test memos from the old store."
+        def g = new AgentRoleLoopTests.ScriptedGateway([
+                router([item("CAUSE_FEEDBACK", words, 0.4)]),
+                evidence([fact("savedRunId", runId, "CONFIG")]),
+                authorEnds("Noted.")])
+        Map out = new AgentOrchestrator(g, AVAILABLE).send(ec, null, AUDIT, null, words, null, "R1")
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertNotEquals("QUESTION", out.outcome, "a statement is enough to know what 'these' means: ${out}".toString())
+        String routed = sentJson(g, 0)
+        assertTrue(routed.contains("Open statement: R1"), routed)
+        assertTrue(routed.contains("F-90011") && routed.contains("CM-1011"), "an open Unexplained finding is in the sample")
+        assertFalse(routed.contains("F-90012"), "a fixed finding is not")
+        assertTrue(sentJson(g, 1).contains("Open statement: R1"), "the investigator sees it too")
+
+        new AgentOrchestrator(new AgentRoleLoopTests.ScriptedGateway([]), AVAILABLE).send(ec, null, AUDIT, null, words, null, "R99")
+        assertTrue(ec.message.errorsString.contains("Statement R99 was not found"), ec.message.errorsString)
+        ec.message.clearErrors()
+    }
+
     @Test
     void "a follow-up on another finding or of another kind investigates again"() {
         asSystem {
