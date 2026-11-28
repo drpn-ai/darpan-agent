@@ -50,6 +50,10 @@ class AuditRunWriter {
     static Closure<ModelGateway> gatewayFor = { def ec -> AnthropicModelGateway.perRequest(ec) }
     /** Tests replace it; production reads the switch ({@link #enabledFor}). */
     static Closure<Boolean> enabled = { def ec, String tenantId -> enabledFor(ec, tenantId) }
+    private static final Map<String, Closure> DEFAULTS = [gatewayFor: gatewayFor, enabled: enabled].asImmutable()
+
+    /** Tests: every seam back to the one production uses (S99-217). */
+    static void resetForTests() { gatewayFor = DEFAULTS.gatewayFor; enabled = DEFAULTS.enabled }
 
     /** {headline, fixes {"R2|cause": sentence}}; empty when the agent is off for the tenant or no usable words came back. */
     static Map write(def ec, String tenantId, Map facts, AgentConfig cfg = AgentConfig.current(ec), AgentLimits lim = AgentLimits.read()) {

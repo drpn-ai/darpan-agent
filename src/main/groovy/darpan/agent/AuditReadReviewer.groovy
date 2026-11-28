@@ -58,6 +58,13 @@ class AuditReadReviewer {
         BrainTicketSupport.insertOnce(ec, [ticketId: TenantScopedFinder.mintId(ec, "darpan.agent.BrainChangeTicket", "ticketId"),
                                            createdDate: ec.user.nowTimestamp] + fields)
     }
+    private static final Map<String, Closure> DEFAULTS = [gatewayFor: gatewayFor, enabled: enabled, openTicket: openTicket,
+                                                          insertTicket: insertTicket].asImmutable()
+
+    /** Tests: every seam back to the one production uses (S99-217). */
+    static void resetForTests() {
+        gatewayFor = DEFAULTS.gatewayFor; enabled = DEFAULTS.enabled; openTicket = DEFAULTS.openTicket; insertTicket = DEFAULTS.insertTicket
+    }
 
     /**
      * Raises the tickets for the report's flags. Answers {tickets: [{ticketId, flag, key, duplicate}], reviewed: n} where

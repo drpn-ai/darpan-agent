@@ -624,6 +624,24 @@ class AgentOrchestratorTests {
         assertEquals(0, g.sent.size())
     }
 
+    /** S99-217: the hour the limit counts is the orchestrator's clock's, as the turn's deadline is, not the wall clock's. */
+    @Test
+    void "the hour the message limit counts is the orchestrator's clock's"() {
+        asSystem {
+            upsert("darpan.agent.AgentConversation", [conversationId: "AGO_EARLIER", companyUserGroupId: OTHER, userId: USER, createdDate: ec.user.nowTimestamp])
+            (1..20).each { int i -> upsert("darpan.agent.AgentTurn", [turnId: "AGO_EARLIER_${i}".toString(), conversationId: "AGO_EARLIER",
+                    companyUserGroupId: OTHER, role: "ROUTER", costMicros: 0L, startedDate: ec.user.nowTimestamp]) }
+        }
+        String words = "Why is this one open?"
+        def g = new AgentRoleLoopTests.ScriptedGateway([router([item("OTHER", words)])])
+        def o = new AgentOrchestrator(g, AVAILABLE)
+        long later = System.currentTimeMillis() + 7_200_000L
+        o.clock = { later }
+        Map out = send(o, words)
+        assertNotEquals("RATE_LIMITED", out.outcome, "two hours on by the clock, the twenty turns are not in its last hour: ${out}".toString())
+        assertEquals(1, g.sent.size())
+    }
+
     @Test
     void "a pasted API key is masked before any model call"() {
         String words = "Why is this open? Here is my key sk-ant-api03-SECRETVALUE and password: hunter2, mail jo@example.org"

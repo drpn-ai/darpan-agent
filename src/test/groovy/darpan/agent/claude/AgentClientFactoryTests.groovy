@@ -17,7 +17,7 @@ class AgentClientFactoryTests {
 
     @BeforeEach @AfterEach
     void clean() {
-        System.clearProperty(KEY_PROP); System.clearProperty(URL_PROP); AgentClientFactory.reset()
+        System.clearProperty(KEY_PROP); System.clearProperty(URL_PROP); AgentClientFactory.resetForTests()
     }
 
     @Test

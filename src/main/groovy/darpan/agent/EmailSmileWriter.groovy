@@ -46,6 +46,10 @@ class EmailSmileWriter {
     static Closure<ModelGateway> gatewayFor = { def ec -> AnthropicModelGateway.perRequest(ec) }
     /** Tests replace it; production reads the deployment switch. */
     static Closure<Boolean> enabled = { def ec -> OneShotSupport.deploymentOn() }
+    private static final Map<String, Closure> DEFAULTS = [gatewayFor: gatewayFor, enabled: enabled].asImmutable()
+
+    /** Tests: every seam back to the one production uses (S99-217). */
+    static void resetForTests() { gatewayFor = DEFAULTS.gatewayFor; enabled = DEFAULTS.enabled }
 
     /** The key's brief, or null when it has none. The one seam for it: DAR-BE-303 moves it to the email's copy row. */
     static String brief(def ec, String key) {

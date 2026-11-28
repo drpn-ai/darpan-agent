@@ -85,7 +85,7 @@ class WorkloadIdentityToken {
     }
 
     /** Tests: restore the real minter and drop the STS client. */
-    static void reset() {
+    static void resetForTests() {
         synchronized (LOCK) {
             minter = { -> mintWithSts() }
             StsClient old = sts

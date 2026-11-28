@@ -197,12 +197,13 @@ class AgentConfig {
         }
     }
 
-    static void resetForTest() {
+    static void resetForTests() {
         clock = { -> System.currentTimeMillis() }
         loader = { ec -> load(ec) }
         frameworkUp = { -> Moqui.executionContextFactory != null }
         snapshot = null
         reloading.set(false)
+        expireCount.set(0)
         OVERRIDE.remove()
     }
 

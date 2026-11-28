@@ -73,6 +73,9 @@ class AgentOrchestrator {
     /** A test seam: the gateway and availability this thread's send#AgentTurn uses instead of the real ones. */
     private static final ThreadLocal<Map> THREAD_OVERRIDE = new ThreadLocal<>()
 
+    /** Tests: this thread's override goes (overrideForThread restores it itself; this is for a test that failed inside). */
+    static void resetForTests() { THREAD_OVERRIDE.remove() }
+
     final ModelGateway gateway
     /** (ec, the turn's AgentConfig, the turn's AgentLimits) -> ON, AGENT_OFF, AGENT_UNAVAILABLE or AGENT_REFUSED. */
     final Closure<String> availability
@@ -175,7 +178,7 @@ class AgentOrchestrator {
         Map access = AgentAccess.access(ec, pinned, userId)
         if (access.state != AgentAccess.LIVE) return response(conversationId, accessOutcome(access), accessReply(cfg, access))
         int turnLimit = lim.turnsPerUserPerHour
-        if (turnsInLastHour(ec, userId) >= turnLimit)
+        if (turnsInLastHour(ec, userId, clock.call()) >= turnLimit)
             return response(conversationId, "RATE_LIMITED", cfg.text("reply.RATE_LIMITED", [count: turnLimit]))
         if (overDailyCap(ec, pinned, cfg, lim)) return response(conversationId, "OVER_BUDGET", cfg.text("reply.OVER_BUDGET"))
 
@@ -755,12 +758,13 @@ class AgentOrchestrator {
     /**
      * Router runs (one per accepted message) the person started in the last hour, in any tenant they may enter: one count
      * over the turn joined to its conversation's userId (darpan.agent.AgentTurnOfUser), with an explicit tenant condition.
+     * now: the orchestrator's clock (S99-217), so the hour moves with the clock tests set, as the turn's deadline does.
      */
-    static long turnsInLastHour(def ec, String userId) {
+    static long turnsInLastHour(def ec, String userId, long now) {
         // The limit spans tenants, but the read still names them: the tenants this person may enter, explicitly.
         List<String> tenants = TenantAccessSupport.listAvailableTenants(ec).collect { it.userGroupId as String }.findAll { it }
         if (!tenants) return 0L
-        Timestamp since = new Timestamp(System.currentTimeMillis() - 3_600_000L)
+        Timestamp since = new Timestamp(now - 3_600_000L)
         return TenantScopedFinder.findGlobalUnscoped(ec, "darpan.agent.AgentTurnOfUser", "agent rate limit: the person's own turns in their tenants")
                 .condition("companyUserGroupId", EntityCondition.IN, tenants).condition("userId", userId).condition("role", RoleSpec.ROUTER)
                 .condition("startedDate", EntityCondition.GREATER_THAN_EQUAL_TO, since).useCache(false).count()

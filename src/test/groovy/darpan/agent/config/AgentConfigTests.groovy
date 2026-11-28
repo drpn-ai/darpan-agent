@@ -28,14 +28,14 @@ class AgentConfigTests {
 
     @AfterAll
     void shutdown() {
-        AgentConfig.resetForTest()
+        AgentConfig.resetForTests()
         AgentConfigTestSupport.clearSettings()
         ec?.destroy()
     }
 
     @BeforeEach
     void fresh() {
-        AgentConfig.resetForTest()
+        AgentConfig.resetForTests()
         AgentConfigTestSupport.clearSettings()
         AgentConfigTestSupport.clear(ec)
     }
@@ -43,7 +43,7 @@ class AgentConfigTests {
     @AfterEach
     void after() {
         AgentConfigTestSupport.clear(ec)
-        AgentConfig.resetForTest()
+        AgentConfig.resetForTests()
         AgentConfigTestSupport.clearSettings()
     }
 

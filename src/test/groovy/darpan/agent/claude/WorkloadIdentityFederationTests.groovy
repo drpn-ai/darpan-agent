@@ -29,8 +29,8 @@ class WorkloadIdentityFederationTests {
                 ANTHROPIC_SERVICE_ACCOUNT_ID : "svac_test",
                 ANTHROPIC_IDENTITY_TOKEN_FILE: dir.resolve("anthropic/identity.jwt").toString(),
         ]
-        AgentClientFactory.reset()
-        WorkloadIdentityToken.reset()
+        AgentClientFactory.resetForTests()
+        WorkloadIdentityToken.resetForTests()
         System.clearProperty(AgentClientFactory.KEY_PROPERTY)
         AgentClientFactory.env = { String name -> envVars[name] }
         WorkloadIdentityToken.minter = { -> mints++; FAKE_JWT }
@@ -38,8 +38,8 @@ class WorkloadIdentityFederationTests {
 
     @AfterEach
     void tearDown() {
-        AgentClientFactory.reset()
-        WorkloadIdentityToken.reset()
+        AgentClientFactory.resetForTests()
+        WorkloadIdentityToken.resetForTests()
         dir.toFile().deleteDir()
     }
 

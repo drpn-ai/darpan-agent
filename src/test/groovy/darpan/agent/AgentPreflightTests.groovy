@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.*
 class AgentPreflightTests {
 
     @AfterEach
-    void forget() { AgentPreflight.reset() }
+    void forget() { AgentPreflight.resetForTests() }
 
     static Closure<Object> ok = { AgentRoleLoopTests.msg("end_turn", [AgentRoleLoopTests.text("OK")]) }
 
@@ -25,7 +25,7 @@ class AgentPreflightTests {
         assertNull(AgentPreflight.refusal(accepted))
         assertEquals(5, accepted.sent.size(), "asked once per JVM")
 
-        AgentPreflight.reset()
+        AgentPreflight.resetForTests()
         def refused = new AgentRoleLoopTests.ScriptedGateway([ok, ok, AgentRoleLoopTests.errors.status(400)])
         String why = AgentPreflight.refusal(refused)
         assertTrue(why?.startsWith("AUTHOR "), why)

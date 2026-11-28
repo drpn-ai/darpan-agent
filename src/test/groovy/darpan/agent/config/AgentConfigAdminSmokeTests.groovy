@@ -58,14 +58,14 @@ class AgentConfigAdminSmokeTests {
 
     @AfterAll
     void cleanup() {
-        AgentConfig.resetForTest()
+        AgentConfig.resetForTests()
         AgentConfigTestSupport.clearSettings()
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
     @BeforeEach
     void fresh() {
-        AgentConfig.resetForTest()
+        AgentConfig.resetForTests()
         AgentConfigTestSupport.clearSettings()
         AgentConfigTestSupport.clear(ec)
         AuditLogTestSupport.wipe(ec)
@@ -75,7 +75,7 @@ class AgentConfigAdminSmokeTests {
     @AfterEach
     void after() {
         AgentConfigTestSupport.clear(ec)
-        AgentConfig.resetForTest()
+        AgentConfig.resetForTests()
     }
 
     // ------------------------------------------------------------------ reads

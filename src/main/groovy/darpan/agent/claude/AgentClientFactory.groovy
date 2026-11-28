@@ -64,8 +64,8 @@ class AgentClientFactory {
         }
     }
 
-    /** Forget the cached client (tests, key rotation). */
-    static void reset() {
+    /** Tests: restore the real environment reader and forget the cached client. */
+    static void resetForTests() {
         env = { String name -> System.getenv(name) }
         synchronized (LOCK) {
             AnthropicClient old = cachedClient

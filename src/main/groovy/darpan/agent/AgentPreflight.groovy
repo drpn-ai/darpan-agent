@@ -89,5 +89,5 @@ class AgentPreflight {
     private static final String ACCEPTED = "accepted"
 
     /** Tests only: forget what was learned, so the next call asks again. */
-    static synchronized void reset() { known = null; knownFingerprint = null }
+    static synchronized void resetForTests() { known = null; knownFingerprint = null }
 }
