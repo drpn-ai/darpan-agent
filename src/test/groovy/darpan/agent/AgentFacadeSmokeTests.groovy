@@ -332,4 +332,56 @@ class AgentFacadeSmokeTests {
     }
 
     private void upsert(String entityName, Map fields) { ec.entity.makeValue(entityName).setAll(fields).createOrUpdate() }
+
+    /**
+     * OC186 (Aditi 2026-11-28 "Record it"): a one-shot writer's request is an AgentTurn row of the tenant it served, with no
+     * conversation, person or grant, and the tenant's daily total (the cap) counts it.
+     */
+    @Test
+    void aWritersRequestIsOnTheTenantsLedgerAndCountsTowardItsCap() {
+        long before = darpan.agent.loop.AgentUsageLedger.todayCostMicros(ec, OTHER)
+        com.anthropic.models.messages.Usage usage = com.anthropic.core.ObjectMappers.jsonMapper().readValue(
+                JsonOutput.toJson([input_tokens: 900, output_tokens: 120]), com.anthropic.models.messages.Usage)
+        darpan.agent.config.AgentConfig cfg = darpan.agent.config.AgentConfig.defaults()
+        long cost = darpan.agent.loop.AgentUsageLedger.recordWriter(ec, OTHER, "AUDIT_RUN_WORDS", usage, "claude-haiku-5-5", cfg)
+        assertTrue(cost > 0L, "a priced model costs something")
+        assertEquals(before + cost, darpan.agent.loop.AgentUsageLedger.todayCostMicros(ec, OTHER))
+        def row = ec.entity.find("darpan.agent.AgentTurn").condition("companyUserGroupId", OTHER).condition("role", "AUDIT_RUN_WORDS")
+                .disableAuthz().useCache(false).list().find()
+        assertNotNull(row)
+        assertNull(row.conversationId)
+        assertNull(row.userId)
+        assertNull(row.grantId)
+        assertEquals(1L, row.requestCount as long)
+        assertEquals("WRITER", row.outcome)
+        assertEquals(cost, darpan.agent.loop.AgentUsageLedger.recordWriter(ec, null, "AUDIT_RUN_WORDS", usage, "claude-haiku-5-5", cfg),
+                "no tenant: priced, recorded nowhere")
+    }
+
+    /** OC186 end to end through the service core calls: a welcome's line, asked with its tenant, is on that tenant's ledger. */
+    @Test
+    void aWelcomesSmileLineIsOnItsTenantsLedger() {
+        Closure enabled = EmailSmileWriter.enabled
+        Closure gatewayFor = EmailSmileWriter.gatewayFor
+        EmailSmileWriter.enabled = { def e -> true }
+        EmailSmileWriter.gatewayFor = { def e -> new darpan.agent.claude.ModelGateway() {
+            com.anthropic.models.messages.Message send(com.anthropic.models.messages.MessageCreateParams params) {
+                return com.anthropic.core.ObjectMappers.jsonMapper().readValue(JsonOutput.toJson([id: "m", type: "message", role: "assistant",
+                        model: "claude-haiku-5-5", content: [[type: "text", text: '{"line": "Welcome aboard, truly."}']],
+                        stop_reason: "end_turn", stop_sequence: null, usage: [input_tokens: 60, output_tokens: 8]]), com.anthropic.models.messages.Message)
+            }
+        } }
+        try {
+            long before = darpan.agent.loop.AgentUsageLedger.todayCostMicros(ec, MINE)
+            Map out = ec.service.sync().name("agent.AgentWriterServices.write#EmailSmile")
+                    .parameters([key: "DARPAN_TENANT_WELCOME", fallback: "Questions? Just reply.", companyUserGroupId: MINE]).call()
+            assertEquals("Welcome aboard, truly.", out.line)
+            assertTrue(darpan.agent.loop.AgentUsageLedger.todayCostMicros(ec, MINE) > before, "the welcome's tenant was charged")
+            assertNotNull(ec.entity.find("darpan.agent.AgentTurn").condition("companyUserGroupId", MINE).condition("role", "EMAIL_SMILE")
+                    .disableAuthz().useCache(false).list().find())
+        } finally {
+            EmailSmileWriter.enabled = enabled
+            EmailSmileWriter.gatewayFor = gatewayFor
+        }
+    }
 }

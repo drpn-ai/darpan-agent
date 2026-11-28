@@ -56,12 +56,14 @@
         <in-parameters>
             <parameter name="key" required="true"><description>The EmailTemplate id (a side suffix for the recovery email)</description></parameter>
             <parameter name="fallback"><description>The template's own line, given as the example</description></parameter>
+            <parameter name="companyUserGroupId"><description>OC186: the tenant the email serves (the welcome), charged for the
+                request; empty for a person's own email (reset, two-factor, recovery), whose spend stays in the log only.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="line"/>
         </out-parameters>
         <actions>
-            <set field="line" from="darpan.agent.EmailSmileWriter.write(ec, key, fallback)"/>
+            <set field="line" from="darpan.agent.EmailSmileWriter.write(ec, key, fallback, companyUserGroupId)"/>
         </actions>
     </service>
 

@@ -101,8 +101,11 @@ class AuditReadReviewer {
             }
             Map facts = facts(report, flags)
             Message message = gatewayFor.call(ec).send(params(facts, cfg, lim), Duration.ofMillis(lim.auditReadReviewTimeoutMs), lim)
+            // OC186: an answer is spend on the tenant's ledger, refused or cut too (it was billed)
+            long cost = AgentUsageLedger.recordWriter(ec, tenantId, AgentConfigDefaults.AUDIT_READ_REVIEW, message.usage(),
+                    message.model()?.asString() ?: model, cfg)
             logger.info("Audit read review for {}: {} in, {} out, {} micro-USD", tenantId, message.usage().inputTokens(),
-                    message.usage().outputTokens(), AgentUsageLedger.costMicros(model, message.usage(), cfg))
+                    message.usage().outputTokens(), cost)
             Object answer = OneShotSupport.answer(message)
             return answer == null ? [:] : checked(facts, answer, lim)
         } catch (Exception e) {

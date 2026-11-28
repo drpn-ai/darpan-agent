@@ -36,7 +36,33 @@ class AuditRunWriterTests {
     void restore() {
         AuditRunWriter.enabled = ENABLED
         AuditRunWriter.gatewayFor = GATEWAY
+        darpan.agent.loop.AgentUsageLedger.resetForTests()
         AgentConfigTestSupport.clearSettings()
+    }
+
+    /** OC186 (Aditi 2026-11-28 "Record it"): every answer the model sent is spend on the tenant's ledger, a refused or cut one too. */
+    @Test
+    void "each answer is recorded on the tenant's ledger, a failed call is not"() {
+        List<Map> recorded = []
+        darpan.agent.loop.AgentUsageLedger.writerRecorder = { def ec, String tenantId, String role, def usage, String model, def cfg ->
+            recorded << [tenantId: tenantId, role: role, model: model, input: usage.inputTokens(), output: usage.outputTokens()]; 7L }
+        AuditRunWriter.enabled = { def ec, String t -> true }
+        List<Duration> timeouts = []
+        AuditRunWriter.gatewayFor = { def ec -> gateway(timeouts) { message("end_turn", JsonOutput.toJson([headline: "", fixes: []])) } }
+        AuditRunWriter.write(null, "TEST_TENANT", FACTS)
+        AuditRunWriter.gatewayFor = { def ec -> gateway(timeouts) { message("refusal", "") } }
+        AuditRunWriter.write(null, "TEST_TENANT", FACTS)
+        AuditRunWriter.gatewayFor = { def ec -> gateway(timeouts) { throw new IllegalStateException("No Claude API key is configured") } }
+        AuditRunWriter.write(null, "TEST_TENANT", FACTS)
+        assertEquals([[tenantId: "TEST_TENANT", role: "AUDIT_RUN_WORDS", model: "claude-haiku-5-5", input: 900L, output: 120L]] * 2, recorded)
+    }
+
+    @Test
+    void "a ledger that cannot be written never costs the words"() {
+        darpan.agent.loop.AgentUsageLedger.writerRecorder = { def ec, String t, String r, def u, String m, def c -> throw new IllegalStateException("db down") }
+        AuditRunWriter.enabled = { def ec, String t -> true }
+        AuditRunWriter.gatewayFor = { def ec -> gateway([]) { message("end_turn", JsonOutput.toJson([headline: "1,204 findings are open.", fixes: []])) } }
+        assertEquals("1,204 findings are open.", AuditRunWriter.write(null, "TEST_TENANT", FACTS).headline)
     }
 
     @Test

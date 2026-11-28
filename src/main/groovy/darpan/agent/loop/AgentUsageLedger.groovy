@@ -90,6 +90,48 @@ class AgentUsageLedger {
         return cost
     }
 
+    /** OC186 test seam: (ec, tenantId, role, usage, model, cfg) -> cost; null writes the row ({@link #writeWriterRow}). */
+    static Closure<Long> writerRecorder = null
+
+    /** Test-only: restores the writer recorder and the grant pauser. */
+    static void resetForTests() {
+        writerRecorder = null
+        pauser = { def e, String grantId -> darpan.agent.AgentAccess.pauseIfOverLimit(e, grantId) }
+    }
+
+    /**
+     * DAR-OPS-029 OC186 (Aditi 2026-11-28: "Record it"). One request of a one-shot writer (audit run words, audit read review, a
+     * tenant's email line) is spend: an AgentTurn row of the tenant it served, with no conversation, person or grant
+     * (conversationId is nullable for this), so todayCostMicros, and with it the tenant's daily cap and the spend views,
+     * count it. A grant is a person's, so writer spend never counts toward one. Answers the cost; never throws (the
+     * writer's words never wait on the ledger), and a failed write is logged.
+     */
+    static long recordWriter(def ec, String tenantId, String role, Usage usage, String model, AgentConfig cfg) {
+        long cost = costMicros(model, usage, cfg)
+        if (!tenantId) return cost
+        try {
+            Closure<Long> recorder = writerRecorder
+            if (recorder != null) return (recorder.call(ec, tenantId, role, usage, model, cfg) ?: cost) as long
+            writeWriterRow(ec, tenantId, role, usage, model, cost)
+        } catch (Exception e) {
+            logger.warn("Agent writer spend for {} ({}) was not recorded: {}", tenantId, role, e.class.simpleName)
+        }
+        return cost
+    }
+
+    /** The writer's AgentTurn row, written whole in its own transaction: one request, its tokens and cost, started and ended now. */
+    private static void writeWriterRow(def ec, String tenantId, String role, Usage usage, String model, long cost) {
+        ec.transaction.runRequireNew(null, "Could not record agent writer spend") {
+            Timestamp now = ec.user.nowTimestamp
+            def row = ec.entity.makeValue(TURN).setAll([companyUserGroupId: tenantId, role: role, model: model, requestCount: 1L,
+                    inputTokens: usage.inputTokens(), outputTokens: usage.outputTokens(),
+                    cacheReadTokens: usage.cacheReadInputTokens().orElse(0L), cacheWriteTokens: usage.cacheCreationInputTokens().orElse(0L),
+                    costMicros: cost, outcome: "WRITER", startedDate: now, endedDate: now])
+            row.setSequencedIdPrimary()
+            row.create()
+        }
+    }
+
     /** Closes the pinned tenant's turn with how the role ended. */
     static void finish(def ec, String pinnedTenantId, String turnId, String stopReason, String outcome) {
         ec.transaction.runRequireNew(null, "Could not close the agent turn") {

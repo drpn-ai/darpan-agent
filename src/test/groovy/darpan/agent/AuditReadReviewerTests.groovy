@@ -52,7 +52,20 @@ class AuditReadReviewerTests {
         AuditReadReviewer.gatewayFor = GATEWAY
         AuditReadReviewer.openTicket = OPEN
         AuditReadReviewer.insertTicket = INSERT
+        darpan.agent.loop.AgentUsageLedger.resetForTests()
         AgentConfigTestSupport.clearSettings()
+    }
+
+    /** OC186 (Aditi 2026-11-28 "Record it"): the review's model call is spend on the tenant's ledger. */
+    @Test
+    void "the review's answer is recorded on the tenant's ledger"() {
+        List<String> recorded = []
+        darpan.agent.loop.AgentUsageLedger.writerRecorder = { def ec, String tenantId, String role, def usage, String model, def cfg ->
+            recorded << "${tenantId}:${role}".toString(); 1L }
+        AuditReadReviewer.enabled = { def ec, String t -> true }
+        AuditReadReviewer.gatewayFor = { def ec -> gateway { message("end_turn", JsonOutput.toJson([reviews: []])) } }
+        AuditReadReviewer.review(null, "TEST_TENANT", "AUD1", REPORT, AgentConfig.defaults(), AgentLimits.read())
+        assertEquals(["TEST_TENANT:AUDIT_READ_REVIEW"], recorded)
     }
 
     @Test

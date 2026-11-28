@@ -114,4 +114,30 @@ class EmailSmileWriterTests {
                 content: text ? [[type: "text", text: text]] : [], stop_reason: stopReason, stop_sequence: null,
                 usage: [input_tokens: 400, output_tokens: 20]]), Message)
     }
+
+    /**
+     * OC186 (Aditi 2026-11-28): an email that serves a tenant (the welcome) records its spend on that tenant's ledger; a
+     * person's own email (reset, two-factor, recovery) has no tenant to charge and stays log-only.
+     */
+    @Test
+    void "only an email that names a tenant records its spend"() {
+        List<String> recorded = []
+        darpan.agent.loop.AgentUsageLedger.writerRecorder = { def ec, String tenantId, String role, def usage, String model, def cfg ->
+            recorded << "${tenantId}:${role}".toString(); 1L }
+        EmailSmileWriter.enabled = { def ec -> true }
+        EmailSmileWriter.gatewayFor = { def ec -> new darpan.agent.claude.ModelGateway() {
+            com.anthropic.models.messages.Message send(com.anthropic.models.messages.MessageCreateParams params) {
+                return com.anthropic.core.ObjectMappers.jsonMapper().readValue(groovy.json.JsonOutput.toJson([id: "m", type: "message",
+                        role: "assistant", model: "claude-haiku-5-5", content: [[type: "text", text: '{"line": "Welcome aboard."}']],
+                        stop_reason: "end_turn", stop_sequence: null, usage: [input_tokens: 50, output_tokens: 9]]), com.anthropic.models.messages.Message)
+            }
+        } }
+        try {
+            EmailSmileWriter.write(null, "DARPAN_2FA_RESET", "Clean slate.")
+            EmailSmileWriter.write(null, "DARPAN_TENANT_WELCOME", "Questions? Just reply.", "MALBON")
+            assertEquals(["MALBON:EMAIL_SMILE"], recorded)
+        } finally {
+            darpan.agent.loop.AgentUsageLedger.resetForTests()
+        }
+    }
 }

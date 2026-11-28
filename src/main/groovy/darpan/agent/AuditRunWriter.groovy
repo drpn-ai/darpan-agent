@@ -62,8 +62,11 @@ class AuditRunWriter {
                 return [:]
             }
             Message message = gatewayFor.call(ec).send(params(facts, cfg, lim), Duration.ofMillis(lim.auditRunWordsTimeoutMs), lim)
+            // OC186: an answer is spend on the tenant's ledger, refused or cut too (it was billed)
+            long cost = AgentUsageLedger.recordWriter(ec, tenantId, AgentConfigDefaults.AUDIT_RUN_WORDS, message.usage(),
+                    message.model()?.asString() ?: model, cfg)
             logger.info("Audit run words for {}: {} in, {} out, {} micro-USD", tenantId, message.usage().inputTokens(),
-                    message.usage().outputTokens(), AgentUsageLedger.costMicros(model, message.usage(), cfg))
+                    message.usage().outputTokens(), cost)
             StopReason stop = message.stopReason().orElse(null)
             if (stop != StopReason.END_TURN) {
                 logger.warn("Audit run words for {}: the model stopped with {}; sent without words", tenantId, stop)

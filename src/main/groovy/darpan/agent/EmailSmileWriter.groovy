@@ -52,8 +52,13 @@ class EmailSmileWriter {
         return key ? BRIEFS[key] : null
     }
 
-    /** The line, or null when the agent is off, the key has no brief, the model is unpriced, or nothing usable came back. */
-    static String write(def ec, String key, String fallback, AgentConfig cfg = AgentConfig.current(ec), AgentLimits lim = AgentLimits.read()) {
+    /**
+     * The line, or null when the agent is off, the key has no brief, the model is unpriced, or nothing usable came back.
+     * tenantId: the tenant the email serves (the welcome), whose ledger the request's spend goes on (OC186). A person's own email
+     * (password reset, two-factor, recovery) serves no tenant: its spend, tiny, stays in the log only, never on a made-up tenant.
+     */
+    static String write(def ec, String key, String fallback, String tenantId = null, AgentConfig cfg = AgentConfig.current(ec),
+                        AgentLimits lim = AgentLimits.read()) {
         String brief = brief(ec, key)
         if (!brief) return null
         try {
@@ -64,8 +69,10 @@ class EmailSmileWriter {
                 return null
             }
             Message message = gatewayFor.call(ec).send(params(brief, fallback, cfg, lim), Duration.ofMillis(lim.emailSmileTimeoutMs), lim)
+            long cost = AgentUsageLedger.recordWriter(ec, tenantId, AgentConfigDefaults.EMAIL_SMILE, message.usage(),
+                    message.model()?.asString() ?: model, cfg)
             logger.info("Email smile {}: {} in, {} out, {} micro-USD", key, message.usage().inputTokens(),
-                    message.usage().outputTokens(), AgentUsageLedger.costMicros(model, message.usage(), cfg))
+                    message.usage().outputTokens(), cost)
             Object answer = OneShotSupport.answer(message)
             String line = answer instanceof Map ? OneShotSupport.oneLine(answer.line) : null
             return line && line != fallback?.trim() ? line : null
