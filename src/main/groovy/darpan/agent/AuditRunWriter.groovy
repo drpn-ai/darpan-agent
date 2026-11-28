@@ -1,22 +1,16 @@
 package darpan.agent
 
-import com.anthropic.core.ObjectMappers
-import com.anthropic.models.messages.CacheControlEphemeral
 import com.anthropic.models.messages.Message
 import com.anthropic.models.messages.MessageCreateParams
-import com.anthropic.models.messages.OutputConfig
 import com.anthropic.models.messages.StopReason
-import com.anthropic.models.messages.TextBlockParam
 import darpan.agent.claude.AnthropicModelGateway
 import darpan.agent.claude.ModelGateway
 import darpan.agent.config.AgentConfig
 import darpan.agent.config.AgentConfigDefaults
 import darpan.agent.config.AgentLimits
-import darpan.agent.loop.AgentRoleLoop
 import darpan.agent.loop.AgentUsageLedger
 import darpan.facade.common.TenantScopedFinder
 import groovy.json.JsonOutput
-import groovy.json.JsonSlurper
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -75,8 +69,7 @@ class AuditRunWriter {
                 logger.warn("Audit run words for {}: the model stopped with {}; sent without words", tenantId, stop)
                 return [:]
             }
-            String text = message.content().find { it.isText() }?.asText()?.text()
-            return checked(facts, text ? new JsonSlurper().parseText(text) : null, lim)
+            return checked(facts, OneShotSupport.answer(message), lim)
         } catch (Exception e) {
             // The class only: a message could carry request detail.
             logger.warn("Audit run words for {} failed ({}); sent without words", tenantId, e.class.simpleName)
@@ -86,8 +79,7 @@ class AuditRunWriter {
 
     /** The agent switch for a named tenant: the deployment property, then that tenant's TenantSetting.agentEnabled. */
     static boolean enabledFor(def ec, String tenantId) {
-        String on = System.getenv(AgentSwitch.ENABLED_ENV)?.trim() ?: System.getProperty(AgentSwitch.ENABLED_PROPERTY)?.trim()
-        if (!"true".equalsIgnoreCase(on)) return false
+        if (!OneShotSupport.deploymentOn()) return false
         def setting = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.auth.TenantSetting", WHY)
                 .condition("companyUserGroupId", tenantId).useCache(false).one()
         return setting?.agentEnabled == "Y"
@@ -95,15 +87,9 @@ class AuditRunWriter {
 
     /** One request: the prompt (cached), the fact sheet, low effort, the schema. Thinking left to the model's default. */
     static MessageCreateParams params(Map facts, AgentConfig cfg, AgentLimits lim) {
-        Map output = [effort: "low", format: [type: "json_schema", schema: SCHEMA]]
-        return MessageCreateParams.builder()
-                .model(cfg.model(AgentConfigDefaults.AUDIT_RUN_WORDS))
-                .maxTokens((long) lim.auditRunWordsMaxTokens)
-                .systemOfTextBlockParams([TextBlockParam.builder().text(cfg.prompt("audit-run-words"))
-                        .cacheControl(CacheControlEphemeral.builder().build()).build()])
-                .addUserMessage("<facts>\n" + JsonOutput.toJson(facts) + "\n</facts>")
-                .outputConfig(ObjectMappers.jsonMapper().convertValue(output, OutputConfig))
-                .build()
+        return OneShotSupport.params(cfg.model(AgentConfigDefaults.AUDIT_RUN_WORDS), (long) lim.auditRunWordsMaxTokens,
+                cfg.prompt("audit-run-words"), "<facts>\n" + JsonOutput.toJson(facts) + "\n</facts>",
+                [effort: "low", format: [type: "json_schema", schema: SCHEMA]])
     }
 
     /**
@@ -117,7 +103,7 @@ class AuditRunWriter {
 
         Set<String> numbers = numbersIn(JsonOutput.toJson(facts))
         numbers << String.valueOf(((facts.rules ?: []) as List<Map>).count { ((it.open ?: 0) as int) > 0 })
-        String headline = oneLine(answer.headline)
+        String headline = OneShotSupport.oneLine(answer.headline)
         if (headline && headline.length() <= lim.auditRunWordsHeadlineMaxChars && !headline.contains("{") && numbers.containsAll(numbersIn(headline, true))) {
             out.headline = headline
         }
@@ -127,7 +113,7 @@ class AuditRunWriter {
             if (!(entry instanceof Map)) return
             String key = entry.key as String
             Map group = groups[key]
-            String text = oneLine(entry.text)
+            String text = OneShotSupport.oneLine(entry.text)
             if (group == null || !text || out.fixes.containsKey(key)) return
             if (text.length() > lim.auditRunWordsFixMaxChars || text.contains("{") || text.contains("}")) return
             if (((group.ids ?: []) as List).any { it && text.contains(it as String) }) return
@@ -145,9 +131,5 @@ class AuditRunWriter {
         def matcher = prose ? (text =~ /\d{1,3}(?:,\d{3})+(?!\d)|\d+/) : (text =~ /\d+/)
         matcher.each { String m -> found << m.replace(",", "").replaceFirst(/^0+(?=\d)/, "") }
         return found
-    }
-
-    private static String oneLine(Object v) {
-        return v instanceof String ? ((String) v).replaceAll(/\s+/, " ").trim() : null
     }
 }

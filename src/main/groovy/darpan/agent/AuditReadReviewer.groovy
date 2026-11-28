@@ -1,12 +1,7 @@
 package darpan.agent
 
-import com.anthropic.core.ObjectMappers
-import com.anthropic.models.messages.CacheControlEphemeral
 import com.anthropic.models.messages.Message
 import com.anthropic.models.messages.MessageCreateParams
-import com.anthropic.models.messages.OutputConfig
-import com.anthropic.models.messages.StopReason
-import com.anthropic.models.messages.TextBlockParam
 import darpan.agent.claude.AnthropicModelGateway
 import darpan.agent.claude.ModelGateway
 import darpan.agent.config.AgentConfig
@@ -15,7 +10,6 @@ import darpan.agent.config.AgentLimits
 import darpan.agent.loop.AgentUsageLedger
 import darpan.facade.common.TenantScopedFinder
 import groovy.json.JsonOutput
-import groovy.json.JsonSlurper
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -109,9 +103,8 @@ class AuditReadReviewer {
             Message message = gatewayFor.call(ec).send(params(facts, cfg, lim), Duration.ofMillis(lim.auditReadReviewTimeoutMs), lim)
             logger.info("Audit read review for {}: {} in, {} out, {} micro-USD", tenantId, message.usage().inputTokens(),
                     message.usage().outputTokens(), AgentUsageLedger.costMicros(model, message.usage(), cfg))
-            if (message.stopReason().orElse(null) != StopReason.END_TURN) return [:]
-            String text = message.content().find { it.isText() }?.asText()?.text()
-            return checked(facts, text ? new JsonSlurper().parseText(text) : null, lim)
+            Object answer = OneShotSupport.answer(message)
+            return answer == null ? [:] : checked(facts, answer, lim)
         } catch (Exception e) {
             logger.warn("Audit read review for {} failed ({}); tickets raised without a review", tenantId, e.class.simpleName)
             return [:]
@@ -128,15 +121,9 @@ class AuditReadReviewer {
     }
 
     static MessageCreateParams params(Map facts, AgentConfig cfg, AgentLimits lim) {
-        Map output = [effort: "low", format: [type: "json_schema", schema: SCHEMA]]
-        return MessageCreateParams.builder()
-                .model(cfg.model(AgentConfigDefaults.AUDIT_READ_REVIEW))
-                .maxTokens((long) lim.auditReadReviewMaxTokens)
-                .systemOfTextBlockParams([TextBlockParam.builder().text(cfg.prompt("audit-read-review"))
-                        .cacheControl(CacheControlEphemeral.builder().build()).build()])
-                .addUserMessage("<facts>\n" + JsonOutput.toJson(facts) + "\n</facts>")
-                .outputConfig(ObjectMappers.jsonMapper().convertValue(output, OutputConfig))
-                .build()
+        return OneShotSupport.params(cfg.model(AgentConfigDefaults.AUDIT_READ_REVIEW), (long) lim.auditReadReviewMaxTokens,
+                cfg.prompt("audit-read-review"), "<facts>\n" + JsonOutput.toJson(facts) + "\n</facts>",
+                [effort: "low", format: [type: "json_schema", schema: SCHEMA]])
     }
 
     /**
@@ -152,8 +139,8 @@ class AuditReadReviewer {
             if (!(r instanceof Map)) return
             String key = r.key as String
             if (!keys.contains(key) || out.containsKey(key) || !OWNERS.contains(r.owner)) return
-            String diagnosis = oneLine(r.diagnosis)
-            String suggestion = oneLine(r.suggestion)
+            String diagnosis = OneShotSupport.oneLine(r.diagnosis)
+            String suggestion = OneShotSupport.oneLine(r.suggestion)
             if (![diagnosis, suggestion].every { usable(it, numbers, lim) }) return
             out[key] = [owner: r.owner, diagnosis: diagnosis, suggestion: suggestion]
         }
@@ -184,9 +171,5 @@ class AuditReadReviewer {
             logger.warn("Audit read review for {}: the {} ticket was not raised ({})", tenantId, flag.flag, e.class.simpleName)
             return null
         }
-    }
-
-    private static String oneLine(Object v) {
-        return v instanceof String ? ((String) v).replaceAll(/\s+/, " ").trim() : null
     }
 }

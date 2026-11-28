@@ -1,20 +1,13 @@
 package darpan.agent
 
-import com.anthropic.core.ObjectMappers
-import com.anthropic.models.messages.CacheControlEphemeral
 import com.anthropic.models.messages.Message
 import com.anthropic.models.messages.MessageCreateParams
-import com.anthropic.models.messages.OutputConfig
-import com.anthropic.models.messages.StopReason
-import com.anthropic.models.messages.TextBlockParam
 import darpan.agent.claude.AnthropicModelGateway
 import darpan.agent.claude.ModelGateway
 import darpan.agent.config.AgentConfig
 import darpan.agent.config.AgentConfigDefaults
 import darpan.agent.config.AgentLimits
-import darpan.agent.loop.AgentRoleLoop
 import darpan.agent.loop.AgentUsageLedger
-import groovy.json.JsonSlurper
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -52,7 +45,7 @@ class EmailSmileWriter {
     /** Tests replace it; production asks for the client on each call. */
     static Closure<ModelGateway> gatewayFor = { def ec -> AnthropicModelGateway.perRequest(ec) }
     /** Tests replace it; production reads the deployment switch. */
-    static Closure<Boolean> enabled = { def ec -> deploymentOn() }
+    static Closure<Boolean> enabled = { def ec -> OneShotSupport.deploymentOn() }
 
     /** The key's brief, or null when it has none. The one seam for it: DAR-BE-303 moves it to the email's copy row. */
     static String brief(def ec, String key) {
@@ -73,10 +66,8 @@ class EmailSmileWriter {
             Message message = gatewayFor.call(ec).send(params(brief, fallback, cfg, lim), Duration.ofMillis(lim.emailSmileTimeoutMs), lim)
             logger.info("Email smile {}: {} in, {} out, {} micro-USD", key, message.usage().inputTokens(),
                     message.usage().outputTokens(), AgentUsageLedger.costMicros(model, message.usage(), cfg))
-            if (message.stopReason().orElse(null) != StopReason.END_TURN) return null
-            String text = message.content().find { it.isText() }?.asText()?.text()
-            Object answer = text ? new JsonSlurper().parseText(text) : null
-            String line = answer instanceof Map ? (answer.line as String)?.replaceAll(/\s+/, " ")?.trim() : null
+            Object answer = OneShotSupport.answer(message)
+            String line = answer instanceof Map ? OneShotSupport.oneLine(answer.line) : null
             return line && line != fallback?.trim() ? line : null
         } catch (Exception e) {
             // The class only: a message could carry request detail.
@@ -85,21 +76,9 @@ class EmailSmileWriter {
         }
     }
 
-    static boolean deploymentOn() {
-        String on = System.getenv(AgentSwitch.ENABLED_ENV)?.trim() ?: System.getProperty(AgentSwitch.ENABLED_PROPERTY)?.trim()
-        return "true".equalsIgnoreCase(on)
-    }
-
     /** One request: the prompt (cached), the brief and the template's line, the schema. No thinking: one short line. */
     static MessageCreateParams params(String brief, String fallback, AgentConfig cfg, AgentLimits lim) {
-        Map output = [format: [type: "json_schema", schema: SCHEMA]]
-        return MessageCreateParams.builder()
-                .model(cfg.model(AgentConfigDefaults.EMAIL_SMILE))
-                .maxTokens((long) lim.emailSmileMaxTokens)
-                .systemOfTextBlockParams([TextBlockParam.builder().text(cfg.prompt("email-smile"))
-                        .cacheControl(CacheControlEphemeral.builder().build()).build()])
-                .addUserMessage("<brief>${brief}</brief>\n<example>${fallback ?: ''}</example>".toString())
-                .outputConfig(ObjectMappers.jsonMapper().convertValue(output, OutputConfig))
-                .build()
+        return OneShotSupport.params(cfg.model(AgentConfigDefaults.EMAIL_SMILE), (long) lim.emailSmileMaxTokens, cfg.prompt("email-smile"),
+                "<brief>${brief}</brief>\n<example>${fallback ?: ''}</example>".toString(), [format: [type: "json_schema", schema: SCHEMA]])
     }
 }
