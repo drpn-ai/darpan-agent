@@ -128,10 +128,8 @@ class AgentToolExecutor {
      */
     static String authorView(String toolName, boolean isError, String content) {
         if (isError) return content == TOOL_FAILED ? TOOL_FAILED : TOOL_ERROR
-        Object out
-        try { out = new groovy.json.JsonSlurper().parseText(content ?: "") } catch (Exception ignored) { out = null }
-        if (!(out instanceof Map)) return TOOL_ERROR
-        Map o = (Map) out
+        Map o = resultMap(content)
+        if (o == null) return TOOL_ERROR
         if (isProposalTool(toolName)) {
             Map bt = o.backtest instanceof Map ? (Map) o.backtest : null
             return JsonOutput.toJson([proposalId: token(o.proposalId), status: token(o.status), statusCode: statusCode(o),
@@ -152,10 +150,8 @@ class AgentToolExecutor {
      */
     static String queryView(String toolName, boolean isError, String content) {
         if (isError) return content == TOOL_FAILED ? TOOL_FAILED : TOOL_ERROR
-        Object out
-        try { out = new groovy.json.JsonSlurper().parseText(content ?: "") } catch (Exception ignored) { out = null }
-        if (!(out instanceof Map)) return TOOL_ERROR
-        Map o = (Map) out
+        Map o = resultMap(content)
+        if (o == null) return TOOL_ERROR
         Closure<List> fields = { Object v -> v instanceof List ? ((List) v).collect { fieldName(it) }.findAll { it } : null }
         if (toolName == "get_query_catalog") {
             return JsonOutput.toJson([
@@ -176,6 +172,16 @@ class AgentToolExecutor {
                     error: err == null ? null : [kind: token(err.kind), line: err.line instanceof Number ? err.line : null]])
         }
         return TOOL_ERROR
+    }
+
+    /** A tool's JSON result as a Map, or null when it is not a JSON object (the caller then answers TOOL_ERROR). */
+    private static Map resultMap(String content) {
+        try {
+            Object out = new groovy.json.JsonSlurper().parseText(content ?: "")
+            return out instanceof Map ? (Map) out : null
+        } catch (Exception ignored) {
+            return null
+        }
     }
 
     /** A field name for the model: a token, or one with spaces (a CSV header such as "Order Number"), at most 64 characters. */
