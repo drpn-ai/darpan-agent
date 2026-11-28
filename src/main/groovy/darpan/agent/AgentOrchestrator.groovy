@@ -342,10 +342,7 @@ class AgentOrchestrator {
      */
     private void runQueryTurn(Turn turn) {
         StringBuilder b = new StringBuilder()
-        if (turn.earlier) {
-            b << "The person's earlier messages, oldest first:\n"
-            turn.earlier.each { b << "- " << oneLine(it, 500) << "\n" }
-        }
+        earlierLines(b, turn)
         if (turn.lastQuestion) b << "The last question asked of them: " << questionFor(turn.lastQuestion, [RoleSpec.QUERY_AUTHOR]) << "\n"
         b << "\nThe person's words, verbatim:\n<<<MESSAGE\n" << turn.words << "\nMESSAGE>>>\n"
         if (turn.draft?.readSpecJson || turn.draft?.scriptBody) {
@@ -383,8 +380,7 @@ class AgentOrchestrator {
         Map found = null
         (toolCalls ?: []).each { Map call ->
             if (call.name != "propose_query" || call.isError) return
-            Object out
-            try { out = new groovy.json.JsonSlurper().parseText((call.full ?: call.content ?: "") as String) } catch (Exception ignored) { out = null }
+            Object out = parseJson((call.full ?: call.content ?: "") as String)
             if (out instanceof Map && ((Map) out).status == "PROPOSED") found = [proposal: ((Map) out).proposal, preview: ((Map) out).preview]
         }
         return found
@@ -419,10 +415,7 @@ class AgentOrchestrator {
         StringBuilder b = new StringBuilder()
         b << "Open finding: " << (turn.findingId ?: "none") << "\n"
         statementLines(b, turn)
-        if (turn.earlier) {
-            b << "The person's earlier messages, oldest first:\n"
-            turn.earlier.each { b << "- " << oneLine(it, 500) << "\n" }
-        }
+        earlierLines(b, turn)
         if (turn.lastQuestion) b << "Your last question to them: " << questionFor(turn.lastQuestion, [RoleSpec.ROUTER]) << "\n"
         b << "\nThe person's message:\n<<<MESSAGE\n" << turn.words << "\nMESSAGE>>>\n"
         return b.toString()
@@ -575,10 +568,7 @@ class AgentOrchestrator {
         b << "Audit: " << (turn.auditCode ?: turn.auditId) << " (auditId " << turn.auditId << ")\n"
         b << "Open finding: " << (turn.findingId ?: "none") << "\n"
         statementLines(b, turn)
-        if (turn.earlier) {
-            b << "The person's earlier messages, oldest first:\n"
-            turn.earlier.each { b << "- " << oneLine(it, 500) << "\n" }
-        }
+        earlierLines(b, turn)
         if (turn.lastQuestion) b << "The last question asked of them: " << questionFor(turn.lastQuestion, [RoleSpec.ROUTER, RoleSpec.AUTHOR]) << "\n"
         b << "\nThe person's words, verbatim:\n<<<MESSAGE\n" << turn.words << "\nMESSAGE>>>\n"
         b << "\nItems of this turn (index from 0): " << JsonOutput.toJson(itemsView(items)) << "\n"
@@ -790,7 +780,6 @@ class AgentOrchestrator {
 
     // ---------------------------------------------------------------- rows
 
-    /** The finding is the tenant's and sits under one of this audit's statements. */
     /**
      * DAR-BE-252. The statement the agent was opened on and a sample of its open Unexplained findings (no conclusion, or
      * UNEXPLAINED), most recently seen first: {statementCode, text, unexplained (count), sample [{findingId, recordKey,
@@ -813,6 +802,13 @@ class AgentOrchestrator {
         return [statementCode: statementCode, text: statement.statementText, unexplained: count, sample: sample]
     }
 
+    /** The person's earlier messages in this conversation, oldest first, one line each (every role's input carries them). */
+    private static void earlierLines(StringBuilder b, Turn turn) {
+        if (!turn.earlier) return
+        b << "The person's earlier messages, oldest first:\n"
+        turn.earlier.each { b << "- " << oneLine(it, 500) << "\n" }
+    }
+
     private static void statementLines(StringBuilder b, Turn turn) {
         if (!turn.statement) return
         Map s = turn.statement
@@ -821,6 +817,7 @@ class AgentOrchestrator {
                 "\"these\" means them. A sample, most recently seen first: " << JsonOutput.toJson(s.sample) << "\n"
     }
 
+    /** The finding is the tenant's and sits under one of this audit's statements. */
     private static boolean findingOfAudit(def ec, String pinned, String auditId, String findingId) {
         def finding = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditFinding", "findingId", findingId, pinned, WHY)
         if (finding == null) return false
